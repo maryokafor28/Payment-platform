@@ -188,7 +188,9 @@ API Gateway (only public-facing service)
 
 The platform uses a hybrid database architecture.
 
-### 3.1 SQL Database
+### 3.1 SQL Database (PostgreSQL)
+
+PostgreSQL is used for all relational data. It is the industry standard for fintech and payment systems and is chosen here because it has the strongest ACID compliance of any open-source SQL database, handles UUIDs natively, and supports row-level locking which matters for concurrent payment debits and credits.
 
 Relational databases store financial data.
 Example tables: users, transactions, payments, accounts
@@ -216,15 +218,67 @@ Example tables: users, transactions, payments, accounts
 6. Commit transaction
    If any step fails, the system performs a rollback.
 
-### 3.2 UUID for Identifiers
+### 3.2 Database Normalization
+
+All tables follow third normal form (3NF). The core rule is: every column in a table must describe that table's primary key, and nothing else. No column should store data that belongs to a different table. This prevents duplicate data, inconsistencies, and update errors.
+The key normalization decisions applied across this schema are:
+
+- User names, emails, and roles live only in the users table. No other table duplicates them.
+- Account balance lives in the accounts table, not on users. A user is a person; an account is a financial entity. They are different things.
+- Assigned chats are not stored as a list on the agent record. They are derived by querying chat_sessions WHERE agent_id = ?. Storing a list in a column violates first normal form.
+- Historical accuracy is preserved on chat_messages with a sender_role column. This is a justified exception — if an agent's role later changes, the record must still reflect what role they held when they sent that message.
+
+### 3.3 UUID for Identifiers
 
 All critical records use UUIDs including payment IDs, transaction IDs, order IDs, user IDs, chat session IDs, and complaint ticket IDs.
 
-### Benefits:
+## Benefits:
 
 - globally unique
 - safe for distributed systems
 - prevents ID collisions
+
+### 3.4 Core Financial Tables
+
+## users
+
+| Field         | Type      | Description              |
+| ------------- | --------- | ------------------------ |
+| user_id       | UUID PK   | Unique identifier        |
+| email         | STRING    | User email address       |
+| password_hash | STRING    | Hashed password          |
+| role          | ENUM      | customer / agent / admin |
+| created_at    | TIMESTAMP | Account creation time    |
+| updated_at    | TIMESTAMP | Last profile update      |
+
+## accounts
+
+Separated from users because balance is a financial property, not a user property. Balance changes constantly and must be written with ACID guarantees independently of user profile updates.
+
+| Field          | Type      | Description              |
+| -------------- | --------- | ------------------------ |
+| account_id     | UUID PK   | Unique identifier        |
+| user_id        | UUID FK   | References users.user_id |
+| balance        | DECIMAL   | Current account balance  |
+| currency       | STRING    | Currency code e.g. NGN   |
+| status         | ENUM      | active / frozen / closed |
+| created_at     | TIMESTAMP | Account creation         |
+| timeupdated_at | TIMESTAMP | Last balance update      |
+
+## transactions
+
+References accounts, not users, because money moves between accounts. A person is just the account holder.
+
+| Field               | Type      | Description                    |
+| ------------------- | --------- | ------------------------------ |
+| transaction_id      | UUID PK   | Unique identifier              |
+| idempotency_key     | STRING    | Prevents duplicate processing  |
+| sender_account_id   | UUID FK   | References accounts.account_id |
+| receiver_account_id | UUID FK   | References accounts.account_id |
+| amount              | DECIMAL   | Amount transferred             |
+| currency            | STRING    | Currency code                  |
+| status              | ENUM      | pending / success / failed     |
+| created_at          | TIMESTAMP | When transaction was initiated |
 
 ---
 
@@ -668,13 +722,46 @@ Components:
 - Offline fallback — durable queue stores messages when no agents online
 - Auto-reply — customer notified when agents are unavailable
 
-### New Database Tables:
+# Database Tables
 
-| Table          | Key Fields                                                                                            |
-| -------------- | ----------------------------------------------------------------------------------------------------- |
-| chat_sessions  | session_id (UUID), user_id, agent_id, status (active/closed), created_at, closed_at                   |
-| chat_messages  | message_id (UUID), session_id, sender_id, sender_role, content, status (pending/delivered), timestamp |
-| support_agents | agent_id (UUID), user_id, name, availability_status (online/offline/busy), assigned_chats             |
+## support_agents
+
+Stores agent-specific data only. Name and email are not duplicated here — they are fetched by joining to the `users` table when needed. Assigned chats are not stored as a column — they are derived by querying `chat_sessions WHERE agent_id = ?`.
+
+| Field               | Type      | Description                              |
+| ------------------- | --------- | ---------------------------------------- |
+| agent_id            | UUID (PK) | Unique identifier for this agent profile |
+| user_id             | UUID (FK) | References users.user_id                 |
+| availability_status | ENUM      | online / offline / busy                  |
+| created_at          | TIMESTAMP | When the agent account was created       |
+| updated_at          | TIMESTAMP | Last availability update                 |
+
+## chat_sessions
+
+`agent_id` is nullable. A session starts with no agent assigned (AI handles it). The column is populated only when a customer escalates to a human agent.
+
+| Field      | Type      | Description                                   |
+| ---------- | --------- | --------------------------------------------- |
+| session_id | UUID (PK) | Unique identifier                             |
+| user_id    | UUID (FK) | References users.user_id — the customer       |
+| agent_id   | UUID (FK) | References support_agents.agent_id — nullable |
+| status     | ENUM      | active / closed                               |
+| created_at | TIMESTAMP | When session was opened                       |
+| closed_at  | TIMESTAMP | When session was closed — nullable            |
+
+## chat_messages
+
+`sender_role` is stored here intentionally. This is a justified exception to strict normalization — if an agent's role later changes, the historical record must still reflect what role they held when the message was sent.
+
+| Field       | Type      | Description                                            |
+| ----------- | --------- | ------------------------------------------------------ |
+| message_id  | UUID (PK) | Unique identifier                                      |
+| session_id  | UUID (FK) | References chat_sessions.session_id                    |
+| sender_id   | UUID (FK) | References users.user_id                               |
+| sender_role | ENUM      | customer / agent / ai — stored for historical accuracy |
+| content     | TEXT      | Message body                                           |
+| status      | ENUM      | pending / delivered                                    |
+| timestamp   | TIMESTAMP | When the message was sent                              |
 
 ### Live Chat API Endpoints
 
@@ -708,18 +795,22 @@ Complaint Types (Issue Categories):
 • Refund request
 • Other
 
-### New Database Table — complaints:
+## complaints
 
-| Field          | Type      | Description                                                              |
-| -------------- | --------- | ------------------------------------------------------------------------ |
-| complaint_id   | UUID      | Unique ticket identifier                                                 |
-| user_id        | UUID      | Customer who lodged the complaint                                        |
-| transaction_id | UUID      | Auto-linked transaction record                                           |
-| issue_type     | ENUM      | Category: failed_txn, wrong_amount, delayed, unauthorized, refund, other |
-| description    | TEXT      | Customer's description of the issue                                      |
-| status         | ENUM      | open/ in review,/resolved/closed                                         |
-| created_at     | TIMESTAMP | When complaint was lodged                                                |
-| updated_at     | TIMESTAMP | Last status change time                                                  |
+`assigned_agent_id` is nullable — a complaint starts unassigned. An admin populates this column via the assign endpoint.  
+User name and transaction details are not stored here. They are fetched by joining to `users` and `transactions` when needed.
+
+| Field             | Type      | Description                                                         |
+| ----------------- | --------- | ------------------------------------------------------------------- |
+| complaint_id      | UUID (PK) | Unique ticket identifier                                            |
+| user_id           | UUID (FK) | References users.user_id — customer who lodged the complaint        |
+| transaction_id    | UUID (FK) | References transactions.transaction_id — auto-linked transaction    |
+| assigned_agent_id | UUID (FK) | References support_agents.agent_id — nullable until assigned        |
+| issue_type        | ENUM      | failed_txn / wrong_amount / delayed / unauthorized / refund / other |
+| description       | TEXT      | Customer's description of the issue                                 |
+| status            | ENUM      | open / in_review / resolved / closed                                |
+| created_at        | TIMESTAMP | When complaint was lodged                                           |
+| updated_at        | TIMESTAMP | Last status change time                                             |
 
 ### Complaint API Endpoints
 
