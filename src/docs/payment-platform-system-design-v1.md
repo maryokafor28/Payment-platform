@@ -354,6 +354,70 @@ Blacklisted token → reject with 401 Unauthorized
 | /v1/auth/logout     | POST   | Blacklist access token + clear refresh cookie           |
 | /v1/auth/logout/all | POST   | Logout from all devices — invalidate all refresh tokens |
 
+## 4.4 Forgot Password & Password Reset
+
+Password reset uses a time-limited, single-use token sent to the user's registered email. The token is stored in Redis (not the database) so it expires automatically and can be invalidated immediately after use.
+
+```
+Flow
+User submits email on /forgot-password page
+        ↓
+Server checks if email exists in users table
+        ↓
+(Always return same response — prevents email enumeration)
+        ↓
+If email exists:
+  → Generate cryptographically secure reset token (UUID / crypto.randomBytes)
+  → Store token in Redis:
+      Key:   password_reset:<token>
+      Value: user_id
+      TTL:   15 minutes (auto-expires)
+  → Send reset link to email:
+      https://payment.com/reset-password?token=<token>
+        ↓
+User clicks link → submits new password
+        ↓
+Server validates token against Redis
+        ↓
+Token missing or expired → return 400 Bad Request
+        ↓
+Token valid:
+  → Hash new password
+  → Update password_hash in users table
+  → Delete token from Redis immediately (single-use)
+  → Blacklist all active access tokens for this user in Redis
+  → Clear all refresh token cookies (force re-login on all devices)
+  → Return 200 OK
+```
+
+## Security Rules
+
+| Rule                                                        | Reason                                                                               |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Always return the same response whether email exists or not | Prevents attackers from discovering which emails are registered                      |
+| Token stored in Redis with 15-minute TTL                    | Auto-expires without any scheduled cleanup job                                       |
+| Token deleted immediately after use                         | Single-use — replaying the same link fails                                           |
+| All active sessions invalidated on reset                    | A password reset means the account may be compromised — forces fullre-authentication |
+| Token generated with crypto.randomBytes                     | Cryptographically secure — cannot be guessed or predicted                            |
+| New password must be hashed before storage                  | Plain-text passwords are never stored                                                |
+
+## API Endpoints
+
+| Endpoint                 | Method | Description                                     |
+| ------------------------ | ------ | ----------------------------------------------- |
+| /v1/auth/forgot-password | POST   | Accept email, send reset link if account exists |
+| /v1/auth/reset-password  | POST   | Accept token + new password, update credentials |
+
+## Redis Keys Used
+
+| Key                    | Value   | TTL        |
+| ---------------------- | ------- | ---------- |
+| password_reset:<token> | user_id | 15 minutes |
+
+No new database table is needed. The token never touches SQL — Redis handles it entirely and cleans it up automatically when the TTL expires.
+Rate Limiting
+The /v1/auth/forgot-password endpoint must be rate limited independently at the API Gateway — for example, 5 requests per hour per IP — to prevent attackers from flooding users' inboxes or abusing the email delivery system.
+
 ---
 
 ## 5. Role-Based Access Control (RBAC)
