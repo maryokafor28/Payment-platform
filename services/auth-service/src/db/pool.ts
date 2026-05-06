@@ -1,24 +1,16 @@
+import { env } from "../config/env";
 import { Pool } from "pg";
 
-function requireEnv(key: string): string {
-  const value = process.env[key];
-  if (!value) throw new Error(`Missing required environment variable: ${key}`);
-  return value;
-}
-
 export const pool = new Pool({
-  host: requireEnv("DB_HOST"),
-  port: Number(requireEnv("DB_PORT")),
-  database: requireEnv("DB_NAME"),
-  user: requireEnv("DB_USER"),
-  password: requireEnv("DB_PASSWORD"),
+  host: env.DB_HOST,
+  port: env.DB_PORT,
+  database: env.DB_NAME,
+  user: env.DB_USER,
+  password: env.DB_PASSWORD,
   options: `-c search_path=auth`,
   application_name: "auth-service",
 
-  ssl:
-    process.env.NODE_ENV === "production"
-      ? { rejectUnauthorized: false }
-      : false,
+  ssl: env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
 
   // pool configuration
   max: 10, // max connections in pool
