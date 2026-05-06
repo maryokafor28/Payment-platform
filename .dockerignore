@@ -1,0 +1,36 @@
+# Git
+.git/
+.github/
+.gitignore
+
+# Dependencies (Docker installs these fresh inside the container)
+node_modules/
+
+# Build outputs
+dist/
+out/
+build/
+
+# Environment files (never copy secrets into a container)
+.env
+*.env*
+
+# Dev and test files
+.vscode/
+coverage/
+reports/
+jest/
+cypress/
+
+# Cache and temp
+.cache/
+.tmp/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and docs
+*.log
+*.md
+docs/

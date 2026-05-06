@@ -415,7 +415,7 @@ Token valid:
 | password_reset:<token> | user_id | 15 minutes |
 
 No new database table is needed. The token never touches SQL — Redis handles it entirely and cleans it up automatically when the TTL expires.
-Rate Limiting
+## Rate Limiting
 The /v1/auth/forgot-password endpoint must be rate limited independently at the API Gateway — for example, 5 requests per hour per IP — to prevent attackers from flooding users' inboxes or abusing the email delivery system.
 
 ---

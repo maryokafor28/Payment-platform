@@ -1,0 +1,14 @@
+CREATE OR REPLACE FUNCTION auth.set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_set_updated_at
+BEFORE UPDATE ON auth.users
+FOR EACH ROW
+WHEN (OLD IS DISTINCT FROM NEW)
+
+EXECUTE FUNCTION auth.set_updated_at();
