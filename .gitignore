@@ -6,7 +6,8 @@ dist/
 
 # environment variables (VERY IMPORTANT)
 .env
-
+auth-service/.env
+payment-service/.env
 # logs
 *.log
 
