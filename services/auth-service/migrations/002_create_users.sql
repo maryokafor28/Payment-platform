@@ -11,10 +11,7 @@ CREATE TABLE auth.users (
   -- constraints
   CONSTRAINT email_format CHECK (email ~* '^[^@]+@[^@]+\.[^@]+$'),
   CONSTRAINT email_length CHECK (char_length(email) <= 255),
-    CONSTRAINT email_lowercase CHECK (email = LOWER(email)),
-
+  CONSTRAINT email_lowercase CHECK (email = LOWER(email)),
   CONSTRAINT password_hash_not_empty CHECK (char_length(password_hash) > 0)
 );
 
--- indexes
-CREATE UNIQUE INDEX idx_users_email ON auth.users (email);

@@ -1,5 +1,13 @@
 import dotenv from "dotenv";
-dotenv.config();
+import path from "path";
+
+// load the right .env file based on NODE_ENV
+dotenv.config({
+  path: path.resolve(
+    process.cwd(),
+    process.env.NODE_ENV === "production" ? ".env.production" : ".env",
+  ),
+});
 
 function requireEnv(key: string): string {
   const value = process.env[key];
@@ -8,6 +16,11 @@ function requireEnv(key: string): string {
 }
 
 export const env = {
+  // service
+  SERVICE_NAME: process.env.SERVICE_NAME ?? "auth-service",
+  PORT: Number(process.env.PORT ?? 3001),
+  NODE_ENV: process.env.NODE_ENV ?? "development",
+
   // database
   DB_HOST: requireEnv("DB_HOST"),
   DB_PORT: Number(requireEnv("DB_PORT")),
@@ -24,7 +37,11 @@ export const env = {
   // redis
   REDIS_URL: requireEnv("REDIS_URL"),
 
-  // app
-  PORT: Number(process.env.PORT ?? 3001),
-  NODE_ENV: process.env.NODE_ENV ?? "development",
+  // helpers
+  get isProduction() {
+    return this.NODE_ENV === "production";
+  },
+  get isDevelopment() {
+    return this.NODE_ENV === "development";
+  },
 };

@@ -1,19 +1,69 @@
-## PAYMENT PLATFORM – TECHNICAL SPECIFICATION (BUILD ORDER)
+# Payment Platform — System Design v1
 
-## 1. System overview
+---
 
-This document describes the architecture and technical design for a secure, scalable payment processing platform.
-The platform enables users to:
+## Table of Contents
+
+- [1. System Overview](#1-system-overview)
+- [2. Microservices Architecture](#2-microservices-architecture)
+  - [2.1 Monolith vs Microservices](#21-monolith-vs-microservices)
+  - [2.2 Service Breakdown](#22-service-breakdown)
+  - [2.3 The API Gateway](#23-the-api-gateway)
+  - [2.4 How Services Communicate](#24-how-services-communicate)
+  - [2.5 End-to-End Request Flow](#25-end-to-end-request-flow)
+  - [2.6 How Services Are Connected](#26-how-services-are-connected)
+  - [2.7 Benefits of This Architecture](#27-benefits-of-this-architecture)
+- [3. Database Layer](#3-database-layer)
+  - [3.1 SQL Database](#31-sql-database-postgresql)
+  - [3.2 Database Normalization](#32-database-normalization)
+  - [3.3 UUID for Identifiers](#33-uuid-for-identifiers)
+  - [3.4 Core Financial Tables](#34-core-financial-tables)
+- [4. Security Layer](#4-security-layer)
+  - [4.1 HTTPS Encryption](#41-https-encryption)
+  - [4.2 Authentication](#42-authentication)
+  - [4.3 Authentication Endpoints](#43-authentication-endpoints)
+  - [4.4 Forgot Password and Password Reset](#44-forgot-password-and-password-reset)
+  - [4.5 Rate Limiting](#45-rate-limiting)
+- [5. Role-Based Access Control](#5-role-based-access-control)
+  - [5.1 Role Definitions](#51-role-definitions)
+  - [5.2 Login Routing](#52-login-routing)
+  - [5.3 JWT Role Integration](#53-jwt-role-integration)
+- [6. Core Backend Design](#6-core-backend-design)
+  - [6.1 Idempotency](#61-idempotency)
+  - [6.2 Payment API Endpoints](#62-payment-api-endpoints)
+- [7. Performance Layer — Redis](#7-performance-layer--redis)
+- [8. Asynchronous Processing — RabbitMQ](#8-asynchronous-processing--rabbitmq)
+  - [8.1 Payment Processing Flow](#81-payment-processing-flow)
+  - [8.2 AI Chat Flow](#82-ai-chat-flow)
+  - [8.3 AI to Live Agent Escalation](#83-ai-to-live-agent-escalation)
+  - [8.4 Offline Handling](#84-offline-handling)
+  - [8.5 Complaint Notification Flow](#85-complaint-notification-flow)
+  - [8.6 RabbitMQ Queues](#86-rabbitmq-queues)
+- [9. Retry Logic and Dead Letter Queue](#9-retry-logic-and-dead-letter-queue)
+- [10. Real-Time Updates](#10-real-time-updates)
+- [11. Support Service](#11-support-service)
+  - [11.1 Live Chat](#111-live-chat)
+  - [11.2 Complaint and Dispute System](#112-complaint-and-dispute-system)
+  - [11.3 Support Database Tables](#113-support-database-tables)
+  - [11.4 Support API Endpoints](#114-support-api-endpoints)
+- [12. Observability and Logging](#12-observability-and-logging)
+- [13. Scalability Layer](#13-scalability-layer)
+- [14. DevOps and CI/CD](#14-devops-and-cicd)
+- [15. High Level Architecture](#15-high-level-architecture)
+- [16. Key System Properties](#16-key-system-properties)
+
+---
+
+## 1. System Overview
+
+This document describes the architecture and technical design for a secure, scalable payment processing platform. The platform enables users to:
 
 - initiate payments
 - process transactions securely
 - track payment status
 - receive real-time updates
-  ### The system prioritizes:
-- security
-- reliability
-- idempotent transactions
-- horizontal scalability
+
+The system prioritizes security, reliability, idempotent transactions, and horizontal scalability.
 
 ---
 
@@ -21,63 +71,49 @@ The platform enables users to:
 
 The platform is built using a microservices architecture. Instead of one large program handling everything, the system is split into small independent services that each do one job. Each service has its own codebase, runs on its own server, and can be deployed or updated independently without affecting the rest of the platform.
 
-### 2.1 Monolith vs Microservices — Simply Explained
+### 2.1 Monolith vs Microservices
 
 A monolith is one big program where everything lives together:
 
 ```
 MONOLITH
 ┌──────────────────────────────────────────┐
-│  Auth + Payments + Chat + Complaints     │
-│  + Notifications — all one program       │
+│  Auth + Payments + Support + Notifications│
+│  — all one program                        │
 └──────────────────────────────────────────┘
 ```
 
-Problem: if Chat crashes → entire app goes down
+Problem: if Support crashes → entire app goes down.
 
 Microservices splits that into independent programs:
 
 ```
 MICROSERVICES
-┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
-│   Auth   │  │ Payments │  │   Chat   │  │Complaints│
-│ Service  │  │ Service  │  │ Service  │  │ Service  │
-└──────────┘  └──────────┘  └──────────┘  └──────────┘
+┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
+│   Auth   │  │ Payments │  │ Support  │  │Notif'n   │  │ Gateway  │
+│ Service  │  │ Service  │  │ Service  │  │ Service  │  │          │
+└──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘
 ```
 
-If Chat crashes → only chat is affected. Payments keep running.
+If Support crashes → only support is affected. Payments keep running.
 
 ### 2.2 Service Breakdown
 
-The platform is divided into the following services:
+| Service              | Port | Responsibility                                                                          |
+| -------------------- | ---- | --------------------------------------------------------------------------------------- |
+| API Gateway          | 3000 | Single entry point — JWT validation, RBAC, rate limiting, routing, logging              |
+| Auth Service         | 3001 | User registration, login, JWT issuance, logout, token blacklisting, password reset      |
+| Payment Service      | 3002 | Send, receive, balance check, transaction history, idempotency                          |
+| Notification Service | 3003 | SSE updates — payment status, complaint updates, agent alerts                           |
+| Support Service      | 3004 | WebSocket chat, AI routing, live agent escalation, complaints, agent availability       |
 
-| Service              | Responsibility                                                     |
-| -------------------- | ------------------------------------------------------------------ |
-| Auth Service         | User registration, login, JWT issuance, logout, token blacklisting |
-| Payment Service      | Send, receive, balance check, transaction history, idempotency     |
-| Notification Service | SSE updates — payment status, complaint updates, agent alerts      |
-| Chat Service         | WebSocket connections, AI chat routing, session management         |
-| Support AI Service   | AI model inference, response generation, escalation scoring        |
-| Agent Service        | Live agent escalation, agent dashboard, availability tracking      |
-| Complaint Service    | Lodge complaints, status updates, assignment to agents             |
-| API Gateway          | Single entry point — auth, RBAC, rate limiting, routing, logging   |
+**Why these five and not more:**
 
-### 2.3 The API Gateway — Your Single Front Door
+The original design had eight services. Chat Service, Support AI Service, Agent Service, and Complaint Service were merged into a single Support Service. They share the same database schema, the same WebSocket infrastructure, and the same agents — splitting them created unnecessary coordination overhead with no real independence benefit. The remaining four domain boundaries are genuine: auth, payments, notifications, and support each own entirely separate data and have no reason to be coupled.
+
+### 2.3 The API Gateway
 
 The API Gateway is the only entry point into the platform. The mobile app, web app, and any external merchant system never talk directly to any service. Every request goes through the gateway first.
-
-WITHOUT Gateway (wrong):
-
-- Mobile App → directly hits Payment Service
-- Mobile App → directly hits Auth Service
-- Mobile App → directly hits Chat Service
-
-Every service is exposed. No central auth or rate limiting.
-
-WITH Gateway (correct):
-Mobile App → API Gateway → routes to the right service
-
-Only one entry point. Auth and rate limiting enforced once.
 
 The API Gateway is responsible for:
 
@@ -89,884 +125,628 @@ The API Gateway is responsible for:
 
 ### 2.4 How Services Communicate
 
-Services never talk directly to each other over the internet. They communicate in two ways depending on whether they need an immediate answer:
+Services communicate in two ways depending on whether they need an immediate answer.
 
-Synchronous — direct call (when you need an answer right now):
+**Synchronous — HTTP (when you need an answer right now):**
+```
+Payment Service → calls Auth Service internally
+"Does this user UUID exist and is their account active?"
+Auth Service replies immediately → "Yes"
+Payment Service continues processing
+```
 
-- Payment Service → calls Auth Service internally
-- Does this user UUID exist and is their account active?'
-- Auth Service replies immediately → 'Yes'
-- Payment Service continues processing
-
-Asynchronous — RabbitMQ message queue (when you do not need to wait):
-
-- Payment Service → publishes 'payment.success' event to RabbitMQ
-- Payment Service moves on immediately — does not wait
+**Asynchronous — RabbitMQ (when you do not need to wait):**
+```
+Payment Service → publishes "payment.success" event to RabbitMQ
+Payment Service moves on immediately — does not wait
   ↓
-- Multiple services consume that event independently:
-- Notification Service → sends SSE update to customer
-- Audit Service → writes audit log entry
-- Webhook Service → fires webhook to merchant (v2)
+Notification Service → sends SSE update to customer
+```
 
-### 2.5 End-to-End Request Flow — Customer Clicks Pay
+### 2.5 End-to-End Request Flow
 
-This is exactly what happens when a customer initiates a payment, step by step:
+This is exactly what happens when a customer initiates a payment:
 
 1. Customer clicks Pay on the app
 2. Request arrives at the API Gateway
 3. Gateway validates JWT — is the token valid and not blacklisted?
-4. Gateway checks RBAC — is this role allowed to call /v1/payments/send?
+4. Gateway checks RBAC — is this role allowed to call `/v1/payments/send`?
 5. Gateway checks rate limit — has this user exceeded 100 requests per minute?
 6. Gateway routes request to Payment Service
 7. Payment Service checks idempotency key in Redis — is this a duplicate request?
 8. Payment Service publishes payment job to RabbitMQ payment queue
-9. Payment Processor Service consumes the job and calls Paystack/Flutterwave
-10. Payment result (success or failed) written to SQL database
-11. Payment Service publishes 'payment.success' or 'payment.failed' event
+9. Payment Service consumes the job and calls Paystack/Flutterwave
+10. Payment result written to SQL database
+11. Payment Service publishes `payment.success` or `payment.failed` event
 12. Notification Service consumes event → pushes SSE to customer
 13. Customer sees real-time status update in the app
 
 ```
 Customer clicks Pay
 ↓
-API Gateway
-JWT valid? ✓ Role allowed? ✓ Rate limit okay? ✓
+API Gateway — JWT valid? ✓  Role allowed? ✓  Rate limit okay? ✓
 ↓
-Payment Service
-Idempotency check (Redis) ✓
+Payment Service — Idempotency check (Redis) ✓
 ↓
 RabbitMQ — payment queue
 ↓
-Payment Processor Service → Paystack / Flutterwave
+Payment Service → Paystack / Flutterwave
 ↓
 SQL Database updated
 ↓
 RabbitMQ — payment.success event
-↓ ↓
-Notification Service Audit Service
-SSE → Customer Audit log entry written
+↓
+Notification Service → SSE → Customer
 ```
 
 ### 2.6 How Services Are Connected
 
-All services run inside Docker containers managed by Kubernetes. They communicate over an internal private network — they are never directly accessible from the outside world. Only the API Gateway has a public-facing address.
-
-Public Internet
+All services run inside Docker containers. They communicate over an internal private network and are never directly accessible from the outside world. Only the API Gateway has a public-facing address.
 
 ```
+Public Internet
 ↓ HTTPS only
 Load Balancer
 ↓
-API Gateway (only public-facing service)
+API Gateway :3000  (only public-facing service)
 ↓ internal private network
-├── Auth Service :3001
-├── Payment Service :3002
-├── Notification Service:3003
-├── Chat Service :3004
-├── Support AI Service :3005
-├── Agent Service :3006
-└── Complaint Service :3007
+├── Auth Service         :3001
+├── Payment Service      :3002
+├── Notification Service :3003
+└── Support Service      :3004
 ↕ all share
-├── SQL Database
+├── PostgreSQL
 ├── Redis
 └── RabbitMQ
 ```
 
 ### 2.7 Benefits of This Architecture
 
-| Benefit                | What It Means in Practice                                                      |
-| ---------------------- | ------------------------------------------------------------------------------ |
-| Fault isolation        | If the Chat Service crashes, payments and auth continue working normally       |
-| Independent deployment | You can update the Complaint Service without redeploying the entire app        |
-| Independent scaling    | If payments get heavy traffic, scale only the Payment Service — not everything |
-| Easier debugging       | Each service has its own logs. You know exactly which service caused an error  |
-| Team friendly          | Different developers can own different services without stepping on each other |
+| Benefit                | What It Means in Practice                                                        |
+| ---------------------- | -------------------------------------------------------------------------------- |
+| Fault isolation        | If the Support Service crashes, payments and auth continue working normally      |
+| Independent deployment | You can update the Payment Service without redeploying the entire app            |
+| Independent scaling    | If payments get heavy traffic, scale only the Payment Service — not everything   |
+| Easier debugging       | Each service has its own logs — you know exactly which service caused an error   |
+| Team friendly          | Different developers can own different services without stepping on each other   |
 
 ---
 
-## 3. DATABASE LAYER
-
-The platform uses a hybrid database architecture.
+## 3. Database Layer
 
 ### 3.1 SQL Database (PostgreSQL)
 
-PostgreSQL is used for all relational data. It is the industry standard for fintech and payment systems and is chosen here because it has the strongest ACID compliance of any open-source SQL database, handles UUIDs natively, and supports row-level locking which matters for concurrent payment debits and credits.
+PostgreSQL is used for all relational data. It is the industry standard for fintech and payment systems — strongest ACID compliance of any open-source SQL database, handles UUIDs natively, and supports row-level locking which matters for concurrent payment debits and credits.
 
-Relational databases store financial data.
-Example tables: users, transactions, payments, accounts
+Each service owns its own PostgreSQL schema. Services never query another service's tables directly.
 
-### Requirements:
+```
+PostgreSQL (one instance)
+├── auth       schema → users, refresh_tokens, audit_logs
+├── payments   schema → accounts, transactions
+├── support    schema → support_agents, chat_sessions, chat_messages, complaints
+└── notifications schema → notification_logs
+```
 
-- ACID compliance :
-  - Atomicity → All or nothing
-  - Consistency → Database rules stay valid
-  - Isolation → Transactions don't interfere
-  - Durability → Data never disappears
-- strong consistency
-- transactional guarantees
-  - Why SQL: Financial operations must be atomic and reliable.
-
-    Financial transactions must follow ACID guarantees.
-
-### Payment flow:
+**Payment flow ACID guarantee:**
 
 1. Begin transaction
 2. Verify account balance
 3. Debit sender
 4. Credit receiver
 5. Record transaction
-6. Commit transaction
-   If any step fails, the system performs a rollback.
+6. Commit — if any step fails, full rollback
 
 ### 3.2 Database Normalization
 
-All tables follow third normal form (3NF). The core rule is: every column in a table must describe that table's primary key, and nothing else. No column should store data that belongs to a different table. This prevents duplicate data, inconsistencies, and update errors.
-The key normalization decisions applied across this schema are:
+All tables follow third normal form (3NF). Every column in a table must describe that table's primary key, and nothing else.
 
-- User names, emails, and roles live only in the users table. No other table duplicates them.
-- Account balance lives in the accounts table, not on users. A user is a person; an account is a financial entity. They are different things.
-- Assigned chats are not stored as a list on the agent record. They are derived by querying chat_sessions WHERE agent_id = ?. Storing a list in a column violates first normal form.
-- Historical accuracy is preserved on chat_messages with a sender_role column. This is a justified exception — if an agent's role later changes, the record must still reflect what role they held when they sent that message.
+Key decisions:
+- User names, emails, and roles live only in `users`. No other table duplicates them.
+- Account balance lives in `accounts`, not `users`. A user is a person; an account is a financial entity.
+- Assigned chats are not stored as a list on the agent record — derived by querying `chat_sessions WHERE agent_id = ?`.
+- `sender_role` on `chat_messages` is a justified exception — historical accuracy requires capturing the role at the time the message was sent.
 
 ### 3.3 UUID for Identifiers
 
-All critical records use UUIDs including payment IDs, transaction IDs, order IDs, user IDs, chat session IDs, and complaint ticket IDs.
+All critical records use UUIDs — payment IDs, transaction IDs, user IDs, chat session IDs, complaint ticket IDs.
 
-## Benefits:
-
-- globally unique
-- safe for distributed systems
-- prevents ID collisions
+Benefits: globally unique, safe for distributed systems, prevents ID enumeration attacks.
 
 ### 3.4 Core Financial Tables
 
-## users
+**users** — `auth` schema
 
-| Field         | Type      | Description              |
-| ------------- | --------- | ------------------------ |
-| user_id       | UUID PK   | Unique identifier        |
-| email         | STRING    | User email address       |
-| password_hash | STRING    | Hashed password          |
-| role          | ENUM      | customer / agent / admin |
-| created_at    | TIMESTAMP | Account creation time    |
-| updated_at    | TIMESTAMP | Last profile update      |
+| Field         | Type          | Description              |
+| ------------- | ------------- | ------------------------ |
+| user_id       | UUID PK       | Unique identifier        |
+| email         | TEXT UNIQUE   | User email address       |
+| password_hash | TEXT          | Hashed password          |
+| role          | ENUM          | customer / agent / admin |
+| created_at    | TIMESTAMPTZ   | Account creation time    |
+| updated_at    | TIMESTAMPTZ   | Last profile update      |
 
-## accounts
+**accounts** — `payments` schema
 
-Separated from users because balance is a financial property, not a user property. Balance changes constantly and must be written with ACID guarantees independently of user profile updates.
+Separated from users because balance is a financial property, not a user property.
 
-| Field          | Type      | Description              |
-| -------------- | --------- | ------------------------ |
-| account_id     | UUID PK   | Unique identifier        |
-| user_id        | UUID FK   | References users.user_id |
-| balance        | DECIMAL   | Current account balance  |
-| currency       | STRING    | Currency code e.g. NGN   |
-| status         | ENUM      | active / frozen / closed |
-| created_at     | TIMESTAMP | Account creation         |
-| timeupdated_at | TIMESTAMP | Last balance update      |
+| Field      | Type        | Description              |
+| ---------- | ----------- | ------------------------ |
+| account_id | UUID PK     | Unique identifier        |
+| user_id    | UUID FK     | References users.user_id |
+| balance    | NUMERIC(20,8) | Current account balance |
+| currency   | TEXT        | Currency code e.g. NGN   |
+| status     | ENUM        | active / frozen / closed |
+| created_at | TIMESTAMPTZ | Account creation         |
+| updated_at | TIMESTAMPTZ | Last balance update      |
 
-## transactions
+**transactions** — `payments` schema
 
-References accounts, not users, because money moves between accounts. A person is just the account holder.
+References accounts, not users, because money moves between accounts.
 
-| Field               | Type      | Description                    |
-| ------------------- | --------- | ------------------------------ |
-| transaction_id      | UUID PK   | Unique identifier              |
-| idempotency_key     | STRING    | Prevents duplicate processing  |
-| sender_account_id   | UUID FK   | References accounts.account_id |
-| receiver_account_id | UUID FK   | References accounts.account_id |
-| amount              | DECIMAL   | Amount transferred             |
-| currency            | STRING    | Currency code                  |
-| status              | ENUM      | pending / success / failed     |
-| created_at          | TIMESTAMP | When transaction was initiated |
+| Field               | Type        | Description                    |
+| ------------------- | ----------- | ------------------------------ |
+| transaction_id      | UUID PK     | Unique identifier              |
+| idempotency_key     | TEXT UNIQUE | Prevents duplicate processing  |
+| sender_account_id   | UUID FK     | References accounts.account_id |
+| receiver_account_id | UUID FK     | References accounts.account_id |
+| amount              | NUMERIC(20,8) | Amount transferred           |
+| currency            | TEXT        | Currency code                  |
+| status              | ENUM        | pending / success / failed     |
+| created_at          | TIMESTAMPTZ | When transaction was initiated |
 
 ---
 
-## 4. Security layer
-
-Security is the highest priority in a payment system.
+## 4. Security Layer
 
 ### 4.1 HTTPS Encryption
 
-All communication between client and server must use HTTPS.
-Benefits:
-
-- encrypts sensitive data
-- prevents man-in-the-middle attacks
-- protects authentication tokens
+All communication between client and server uses HTTPS. This encrypts sensitive data, prevents man-in-the-middle attacks, and protects authentication tokens.
 
 ### 4.2 Authentication
 
-Authentication will be implemented using JSON Web Tokens (JWT).
-JWT Structure — A JWT contains three parts: Header, Payload, Signature.
-Token Strategy — Two token types will be used:
+Authentication uses JSON Web Tokens (JWT) with two token types:
 
-### Access Token:
+**Access Token** — returned in the response body, short lifespan (15 minutes), used for authenticated requests.
 
-- returned in the response body
-- short lifespan
-- used for authenticated requests
-  Refresh Token:
-- stored in HttpOnly cookies
-- used to generate new access tokens
-- longer lifespan
+**Refresh Token** — stored in an HttpOnly cookie, longer lifespan (7 days), used to generate new access tokens.
 
-### Refresh Token Security — Refresh tokens must include:
+Refresh token cookies must have `HttpOnly`, `Secure`, and `SameSite` flags set. This prevents XSS attacks, CSRF attacks, and token theft.
 
-- HttpOnly cookie
-- Secure flag
-- SameSite protection
-  This prevents XSS attacks, CSRF attacks, and token theft.
-  Security Stack:
-
-  ```
-  HTTPS
-   ↓
-  JWT Authentication
-   ↓
-  Refresh Tokens (HttpOnly Cookies)
-  ```
-
-### Logout and Token Blacklisting
+**Logout and Token Blacklisting:**
 
 ```
 User clicks logout
-        ↓
-POST /auth/logout
-        ↓
+↓
+POST /v1/auth/logout
+↓
 Server stores access token in Redis blacklist
 TTL = token's remaining lifespan (auto-deletes when expired)
-        ↓
+↓
 Refresh token cookie is cleared
-        ↓
+↓
 On every request, API Gateway checks Redis blacklist
-        ↓
+↓
 Blacklisted token → reject with 401 Unauthorized
 ```
 
 ### 4.3 Authentication Endpoints
 
-| Endpoint            | Method | Description                                             |
-| ------------------- | ------ | ------------------------------------------------------- |
-| /v1/auth/register   | POST   | Register a new user — role auto-assigned: customer      |
-| /v1/auth/login      | POST   | Login and receive JWT access token + refresh cookie     |
-| /v1/auth/refresh    | POST   | Generate new access token using refresh cookie          |
-| /v1/auth/logout     | POST   | Blacklist access token + clear refresh cookie           |
-| /v1/auth/logout/all | POST   | Logout from all devices — invalidate all refresh tokens |
+| Method | Endpoint                    | Description                                             |
+| ------ | --------------------------- | ------------------------------------------------------- |
+| POST   | `/v1/auth/register`         | Register a new user — role auto-assigned: customer      |
+| POST   | `/v1/auth/login`            | Login and receive JWT access token + refresh cookie     |
+| POST   | `/v1/auth/refresh`          | Generate new access token using refresh cookie          |
+| POST   | `/v1/auth/logout`           | Blacklist access token + clear refresh cookie           |
+| POST   | `/v1/auth/logout/all`       | Logout from all devices — invalidate all refresh tokens |
 
-## 4.4 Forgot Password & Password Reset
+### 4.4 Forgot Password and Password Reset
 
-Password reset uses a time-limited, single-use token sent to the user's registered email. The token is stored in Redis (not the database) so it expires automatically and can be invalidated immediately after use.
+Password reset uses a time-limited, single-use token sent to the user's email. The token lives in Redis only — never in the database.
 
 ```
-Flow
-User submits email on /forgot-password page
-        ↓
-Server checks if email exists in users table
-        ↓
-(Always return same response — prevents email enumeration)
-        ↓
+User submits email
+↓
+Server checks if email exists (always returns same response — prevents enumeration)
+↓
 If email exists:
-  → Generate cryptographically secure reset token (UUID / crypto.randomBytes)
-  → Store token in Redis:
-      Key:   password_reset:<token>
-      Value: user_id
-      TTL:   15 minutes (auto-expires)
-  → Send reset link to email:
-      https://payment.com/reset-password?token=<token>
-        ↓
-User clicks link → submits new password
-        ↓
+  → Generate token with crypto.randomBytes
+  → Store in Redis: key = password_reset:<token>, value = user_id, TTL = 15 minutes
+  → Send reset link to email
+↓
+User submits new password with token
+↓
 Server validates token against Redis
-        ↓
-Token missing or expired → return 400 Bad Request
-        ↓
+↓
 Token valid:
-  → Hash new password
-  → Update password_hash in users table
+  → Hash new password → update users table
   → Delete token from Redis immediately (single-use)
-  → Blacklist all active access tokens for this user in Redis
-  → Clear all refresh token cookies (force re-login on all devices)
+  → Blacklist all active access tokens for this user
+  → Clear all refresh token cookies
   → Return 200 OK
 ```
 
-## Security Rules
+| Method | Endpoint                    | Description                                     |
+| ------ | --------------------------- | ----------------------------------------------- |
+| POST   | `/v1/auth/forgot-password`  | Accept email, send reset link if account exists |
+| POST   | `/v1/auth/reset-password`   | Accept token and new password, update credentials |
 
-| Rule                                                        | Reason                                                                               |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Always return the same response whether email exists or not | Prevents attackers from discovering which emails are registered                      |
-| Token stored in Redis with 15-minute TTL                    | Auto-expires without any scheduled cleanup job                                       |
-| Token deleted immediately after use                         | Single-use — replaying the same link fails                                           |
-| All active sessions invalidated on reset                    | A password reset means the account may be compromised — forces fullre-authentication |
-| Token generated with crypto.randomBytes                     | Cryptographically secure — cannot be guessed or predicted                            |
-| New password must be hashed before storage                  | Plain-text passwords are never stored                                                |
+**Redis keys:**
 
-## API Endpoints
+| Key                      | Value   | TTL        |
+| ------------------------ | ------- | ---------- |
+| `password_reset:<token>` | user_id | 15 minutes |
 
-| Endpoint                 | Method | Description                                     |
-| ------------------------ | ------ | ----------------------------------------------- |
-| /v1/auth/forgot-password | POST   | Accept email, send reset link if account exists |
-| /v1/auth/reset-password  | POST   | Accept token + new password, update credentials |
+### 4.5 Rate Limiting
 
-## Redis Keys Used
-
-| Key                    | Value   | TTL        |
-| ---------------------- | ------- | ---------- |
-| password_reset:<token> | user_id | 15 minutes |
-
-No new database table is needed. The token never touches SQL — Redis handles it entirely and cleans it up automatically when the TTL expires.
-## Rate Limiting
-The /v1/auth/forgot-password endpoint must be rate limited independently at the API Gateway — for example, 5 requests per hour per IP — to prevent attackers from flooding users' inboxes or abusing the email delivery system.
+The `/v1/auth/forgot-password` endpoint is rate limited at 5 requests per hour per IP at the API Gateway to prevent inbox flooding and email system abuse.
 
 ---
 
-## 5. Role-Based Access Control (RBAC)
-
-The platform implements Role-Based Access Control to manage permissions across three user types: Customer, Support Agent, and Admin. The user role is embedded in the JWT payload and validated at the API Gateway before any request reaches backe
+## 5. Role-Based Access Control
 
 ### 5.1 Role Definitions
 
-| Role          | Permissions                                                                                                                  |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Customer      | Start chats, send messages, lodge complaints, view own transaction history, check own complaint status                       |
-| Support Agent | View assigned chat sessions, respond to customers, update complaint status (Open → In Review → Resolved)                     |
-| Admin         | View all chats and complaints, assign agents, close/escalate tickets, manage agent accounts, access dashboards and analytics |
+| Role          | Permissions                                                                                                              |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Customer      | Start chats, send messages, lodge complaints, view own transaction history, check own complaint status                   |
+| Support Agent | View assigned chat sessions, respond to customers, update complaint status                                               |
+| Admin         | View all chats and complaints, assign agents, close tickets, manage agent accounts, access dashboards and analytics      |
 
-- LOGIN ROUTING
-  How Login Works:
-  There is a single login page at payment.com/login.(not yet the address) No role selection is shown to the user. After login, the server issues a JWT with the user's role baked in silently, and the frontend automatically redirects them based on that role.
+### 5.2 Login Routing
 
-payment.com/login
-
-Email: [____________]
-Password: [____________]
-[ Login ]
-
-No role selection. No dropdown. Just email and password.
-After Login — Automatic Redirect:
+There is a single login page. No role selection is shown. After login the server issues a JWT with the role baked in silently, and the frontend redirects based on that role.
 
 ```
 User submits email + password
-        ↓
-Server checks database for that account's role
-        ↓
-JWT issued silently with role inside
-        ↓
-Frontend reads role and redirects:
-
-  customer  →  payment.com/dashboard
-  agent     →  payment.com/agent
-  admin     →  payment.com/admin
+↓
+Server checks role from database
+↓
+JWT issued with role inside
+↓
+Frontend redirects:
+  customer → /dashboard
+  agent    → /agent
+  admin    → /admin
 ```
 
-- Route Protection:
+Route protection is enforced at two levels — frontend redirects on role mismatch, and the API Gateway returns 403 if the frontend is bypassed.
 
-```
-User manually types payment.com/admin
-        ↓
-Frontend checks JWT role
-        ↓
-Role is not "admin" → redirect to /dashboard immediately
-        ↓
-Even if frontend is bypassed → API Gateway blocks with 403
-```
+Customers can never self-assign a role. Registration always assigns `customer`. Agent and admin roles are assigned manually in the database.
 
-| How                                                 | Role Given                       |
-| --------------------------------------------------- | -------------------------------- |
-| User signs up via payment.com/register              | Always customer — automatic      |
-| You manually onboard a staff member in the database | agent or admin — assigned by you |
-
-Customers can never self-upgrade their role. Role is locked to the account in the database, not chosen at login.
-
-### 4.2 JWT Role Integration
-
-The JWT payload must include a role field on all authenticated requests:
+### 5.3 JWT Role Integration
 
 ```json
-{ "userId": "uuid", "role": "customer" | "agent" | "admin", "exp": 1234567890 }
+{
+  "userId": "uuid",
+  "role": "customer | agent | admin",
+  "exp": 1234567890
+}
 ```
 
-## Every support endpoint checks the role claim before allowing access. Unauthorized role access returns HTTP 403 Forbidden.
-
-## 6. CORE BACKEND DESIGN
-
-### 6.2 Idempotency
-
-Payment requests must be idempotent.
-Problem — A network glitch may cause duplicate requests. Without idempotency, two payments could be processed for a single user action.
-Example: User clicks Pay → Network delay → User clicks Pay again → Without idempotency: Two payments processed ❌
-Solution — Use Idempotency Keys.
-
-### Workflow:
-
-- Client sends request with Idempotency-Key
-- Server checks Redis for existing key
-- If key exists → return previous result (no duplicate charge)
-- If key does not exist → process payment and store result
-  Benefits: prevents duplicate payments, ensures transaction safety.
-
-### 6.3 Payment API Endpoints
-
-These are the core APIs the platform exposes:
-Endpoint Method Description
-
-| Endpoint          | Method | Description                                   |
-| ----------------- | ------ | --------------------------------------------- |
-| /payments/send    | POST   | Initiate a payment to another user            |
-| /payments/receive | POST   | Receive/accept an incoming payment            |
-| /payments/:id     | GET    | Get status of a specific payment              |
-| /payments/history | GET    | List all transactions for a user              |
-| /accounts/balance | GET    | Check account balance                         |
-| /auth/register    | POST   | Register a new user                           |
-| /auth/login       | POST   | Login and receive tokens                      |
-| /auth/refresh     | POST   | Refresh access token                          |
-| /auth/logout      | POST   | Blacklist access token + clear refresh cookie |
-| /auth/logout/all  | POST   | Logout from all devices                       |
+Every protected endpoint checks the role claim before allowing access. Unauthorized role access returns HTTP 403 Forbidden.
 
 ---
 
-## 7. PERFORMANCE LAYER — REDIS CACHE
+## 6. Core Backend Design
 
-Redis will be used to reduce database load.
-Use cases:
+### 6.1 Idempotency
 
-- caching frequently accessed data
-- session storage
-- rate limiting counters : Redis tracks how many requests each user makes within a time window.
-- idempotency key storage
-- Agent availabilty tracking (for live chat routing)
-
-Rate Limiting Flow:
+Payment requests must be idempotent. A network glitch may cause duplicate requests — without idempotency, two payments could be processed for a single user action.
 
 ```
+Client sends request with Idempotency-Key header
+↓
+Server checks Redis for existing key
+↓
+Key exists    → return previous result (no duplicate charge)
+Key not found → process payment and store result in Redis
+```
+
+### 6.2 Payment API Endpoints
+
+| Method | Endpoint              | Description                              |
+| ------ | --------------------- | ---------------------------------------- |
+| POST   | `/v1/payments/send`   | Initiate a payment to another user       |
+| POST   | `/v1/payments/receive`| Receive an incoming payment              |
+| GET    | `/v1/payments/:id`    | Get status of a specific payment         |
+| GET    | `/v1/payments/history`| List all transactions for the user       |
+| GET    | `/v1/accounts/balance`| Check account balance                    |
+
+---
+
+## 7. Performance Layer — Redis
+
+Redis reduces database load and powers time-sensitive features across all services.
+
+| Use Case               | Description                                               |
+| ---------------------- | --------------------------------------------------------- |
+| Token blacklist        | Blacklisted JWTs stored with TTL matching token expiry    |
+| Password reset tokens  | Single-use reset tokens with 15-minute TTL                |
+| Idempotency keys       | Deduplication keys for payment requests                   |
+| Rate limiting counters | Per-user request counters with 60-second windows          |
+| Agent availability     | Online/offline/busy status for live chat routing          |
+| Escalation flags       | Session escalation state for AI-to-agent handoff          |
+
+**Rate limiting flow:**
+```
 User makes request
-        ↓
+↓
 Redis checks counter for that user
-        ↓
-Counter < 100 → allow request → increment counter
-        ↓
-Counter = 100 → block request → return 429 Too Many Requests
-        ↓
+↓
+Counter < 100 → allow and increment
+Counter = 100 → block → return 429 Too Many Requests
 After 60 seconds → counter resets
 ```
 
-- Cache Flow
-
-```
-
-API Request
-↓
-Redis Cache
-↓
-Database (if cache miss)
-
-```
-
-Benefits: faster response time, reduced database load.
-
 ---
 
-## 8. API PROTECTION LAYER
+## 8. Asynchronous Processing — RabbitMQ
 
-### 8.1 Rate Limiting
+RabbitMQ handles all background jobs so the API always responds instantly and processing happens in the background.
 
-Rate limiting prevents API abuse.
-Example policy: 100 requests per minute per user
-Protects against: bots, brute force attacks, API abuse
-
-- Implementation: Redis-based rate limiting
-
-### 8.2 API Gateway
-
-An API Gateway will sit in front of backend services.
-Responsibilities:
-
-- authentication validation (JWT + RBAC role check)
-- rate limiting enforcement
-- request routing to correct microservice
-- logging and monitoring
+### 8.1 Payment Processing Flow
 
 ```
-Client
-  ↓
-API Gateway
-  ↓
-Backend Services
-```
-
----
-
-## 9. ASYNCHRONOUS PROCESSING - RABBITMQ
-
-Payment processing avoids blocking requests. RabbitMQ handles all background jobs — payments, AI chat routing, live agent escalation, complaint notifications — so the API always responds instantly and processing happens in the background.
-
-### 9.1 Payment Processing Flow:
-
-```
-
 User → Payment Request
 ↓
-API Server → publishes to RabbitMq payment queue
+Payment Service → publishes to RabbitMQ payment queue
 ↓
-Payment Processor Service consumes the message
+Payment Service consumes job → calls Paystack / Flutterwave
 ↓
 Database updated
 ↓
-Notification Service triggered
-
+Notification Service triggered via payment.success event
 ```
 
-Benefits: retries, reliability, failure isolation, background processing.
+### 8.2 AI Chat Flow
 
-### 9.2 AI Chat Flow — First Response (All Customers)
-
-Every customer who opens the chat goes through the AI assistant first. The AI handles common queries automatically. A live agent is only involved if the customer requests one or the AI cannot resolve the issue.
+Every customer goes through the AI assistant first. A live agent is only involved if the customer requests one or the AI cannot resolve the issue.
 
 ```
-Customer opens chat and sends a message
-  ↓  WebSocket Server receives it
-  ↓  Published to RabbitMQ → 'chat.messages' exchange
-  ↓  Chat Router checks: is this session assigned to a live agent?
-  ↓  No → route to AI Chat Service
-  ↓  AI processes message using trained support model
-     (handles: failed transactions, balance queries, complaint status,
-      payment instructions, FAQs)
-  ↓  AI reply saved to DB (chat_messages table)
-  ↓  AI response delivered to customer via WebSocket
-```
-
-### 9.3 AI to Live Agent Escalation
-
-The customer can request a live agent at any point. The AI also escalates automatically if it cannot confidently resolve the issue.
-
-Customer types: 'I want to speak to a human' / 'Live agent'
-OR
-AI confidence score drops below threshold after 3 attempts
-↓ Escalation flag set in Redis for this session
-↓ Session published to RabbitMQ → 'agent.escalation' queue
-↓ Customer receives message:
-'Connecting you to a live agent. Please hold.'
-↓ Chat Router assigns session to available agent (Redis availability check)
-↓ Agent receives full conversation history including AI exchange
-↓ Agent responds via WebSocket — customer sees reply in real time
-
-### 9.4 Offline Handling — No Agent Available
-
-When no support agent is online, the system handles messages durably without loss:
-
-```
-
 Customer sends message
-  ↓
+↓
 WebSocket Server receives it
-  ↓
-Published to RabbitMQ → 'chat.messages' exchange
-  ↓
-Chat Processor checks agent availability (Redis)
-  ↓
-No agent online → message saved to DB (status = 'pending')
-  ↓
-RabbitMQ holds message in 'offline.queue' (durable — survives restarts)
-  ↓
-Customer receives auto-reply:
-  'No agents available. We will respond within 24 hours.'
-  ↓
-When agent comes online → Redis updates availability flag
-  ↓
-RabbitMQ delivers pending messages from 'offline.queue'
-  ↓
-Agent sees full conversation history
-  ↓
-Agent replies → SSE pushes notification to customer
+↓
+Published to RabbitMQ → chat.messages exchange
+↓
+Chat Router checks: is this session assigned to a live agent?
+↓
+No → route to AI
+↓
+AI processes message → reply saved to DB → delivered via WebSocket
 ```
 
-Key property: The 'offline.queue' is durable, meaning messages survive server restarts and are never lost even if the system goes down between the customer sending and the agent coming online.
+### 8.3 AI to Live Agent Escalation
+
+```
+Customer types "I want a human" OR AI confidence drops below threshold
+↓
+Escalation flag set in Redis for this session
+↓
+Session published to RabbitMQ → agent.escalation queue
+↓
+Customer receives: "Connecting you to a live agent. Please hold."
+↓
+Chat Router assigns session to available agent (Redis availability check)
+↓
+Agent receives full conversation history including AI exchange
+↓
+Agent responds via WebSocket
+```
+
+### 8.4 Offline Handling
+
+```
+No agent online → message saved to DB (status = pending)
+↓
+RabbitMQ holds message in offline.queue (durable — survives restarts)
+↓
+Customer receives: "No agents available. We will respond within 24 hours."
+↓
+When agent comes online → Redis updates availability flag
+↓
+RabbitMQ delivers pending messages from offline.queue
+```
 
 ### 8.5 Complaint Notification Flow
 
 ```
-Customer lodges complaint → POST /support/complaints
-  ↓
-API saves complaint (status = 'Open')
-  ↓
-Published to RabbitMQ → 'complaints' exchange
-  ↓
-Notification Service consumes event
-  ↓
-SSE pushes to customer: 'Complaint #UUID received'
-  ↓
-Admin dashboard receives alert: 'New complaint assigned'
-  ↓
-Agent updates status → PATCH /support/complaints/:id
-  ↓
-RabbitMQ → Notification Service
-  ↓
-SSE pushes to customer: 'Your complaint is now In Review'
+Customer lodges complaint → POST /v1/support/complaints
+↓
+Complaint saved (status = open)
+↓
+Published to RabbitMQ → complaints exchange
+↓
+Notification Service → SSE to customer: "Complaint #UUID received"
+↓
+Agent updates status → PATCH /v1/support/complaints/:id
+↓
+Notification Service → SSE to customer: "Your complaint is now In Review"
 ```
 
----
+### 8.6 RabbitMQ Queues
 
-## 10. Retry Logic and Dead Letter Queue (DLQ)
-
-Any background job that fails — webhook delivery, payment processing, notification — is automatically retried by RabbitMQ using exponential backoff. No failed job is ever silently lost.
-
-### 10.1 Exponential Backoff
-
-Job fails on first attempt
-↓ Attempt 1 → wait 30 seconds → retry
-
-↓ Attempt 2 → wait 1 minute → retry
-
-↓ Attempt 3 → wait 5 minutes → retry
-
-↓ Attempt 4 → wait 30 minutes → retry
-
-↓ All attempts exhausted
-
-↓ Message moved to Dead Letter Queue
-
-Exponential backoff means each retry waits longer than the last. This prevents the system from hammering a service that is already struggling to recover.
-
-### 10.2 Dead Letter Queue
-
-The DLQ is a holding area for messages that have failed all retries. Nothing is silently discarded — every failed message lands here for human inspection.
-
-Message enters Dead Letter Queue
-↓ Admin dashboard shows: 3 messages in DLQ
-
-↓ Admin inspects: what failed, why, how many attempts
-
-↓ Options: - Fix the issue → manually replay the message - Discard it → reason recorded in audit log
-
-| Queue              | Purpose                                     |
-| ------------------ | ------------------------------------------- |
-| payment.processing | Main payment processing jobs                |
-| chat.messages      | AI chat message routing                     |
-| agent.escalation   | live agent escalation requests              |
-| offline.queue      | pending escalations when no agent is online |
-| complaints         | complaint status change notificatuions      |
+| Queue                | Purpose                                       |
+| -------------------- | --------------------------------------------- |
+| `payment.processing` | Main payment processing jobs                  |
+| `chat.messages`      | AI chat message routing                       |
+| `agent.escalation`   | Live agent escalation requests                |
+| `offline.queue`      | Pending messages when no agent is online      |
+| `complaints`         | Complaint status change notifications         |
 
 ---
 
-## 11. Real-Time Updates
+## 9. Retry Logic and Dead Letter Queue
 
-Clients receive live updates via Server-Sent Events (SSE) for payment events, and WebSockets for bidirectional chat communication.
+Any background job that fails is automatically retried using exponential backoff. No failed job is ever silently lost.
 
-| Technology               | Direction            | Use Case                                                      |
-| ------------------------ | -------------------- | ------------------------------------------------------------- |
-| SSE (Server-Sent Events) | Server → Client only | Payment status, complaint status updates, agent notifications |
-| WebSockets               | Bidirectional        | Live chat between customer to AI and support agent            |
+**Exponential backoff:**
+```
+Attempt 1 → wait 30 seconds → retry
+Attempt 2 → wait 1 minute   → retry
+Attempt 3 → wait 5 minutes  → retry
+Attempt 4 → wait 30 minutes → retry
+All attempts exhausted → message moved to Dead Letter Queue
+```
 
-SSE Events:
+**Dead Letter Queue (DLQ):**
 
-- Payment status changes
-- Transaction completion or failure
-- Complaint status updates (Open → In Review → Resolved)
-- New complaint assigned (agent/admin)
+Every failed message lands in the DLQ for human inspection. Admin can replay or discard with a reason recorded in the audit log. Nothing is silently discarded.
 
 ---
 
-## 12. Customer Support Features
+## 10. Real-Time Updates
 
-### 12.1 Inbuilt Live Chat
+| Technology | Direction       | Use Case                                                        |
+| ---------- | --------------- | --------------------------------------------------------------- |
+| SSE        | Server → Client | Payment status, complaint updates, agent notifications          |
+| WebSockets | Bidirectional   | Live chat between customer and AI or support agent              |
 
-The platform provides a real-time chat widget enabling customers to communicate with support agents directly within the application. No redirect to external services.
+SSE events: payment status changes, transaction completion or failure, complaint status updates, new complaint assigned.
 
-Technology Stack:
+---
 
+## 11. Support Service
+
+The Support Service consolidates chat, AI routing, live agent escalation, agent management, and complaints into a single service. These features share the same database schema, the same WebSocket infrastructure, and the same agents — separating them would create coordination overhead with no independence benefit.
+
+**Port:** 3004 — **Schema:** `support`
+
+### 11.1 Live Chat
+
+Every customer who opens chat goes through the AI assistant first. A live agent is only involved if the customer requests one or the AI cannot resolve the issue.
+
+**Technology:**
 - WebSockets — bidirectional real-time messaging
-- RabbitMQ — message queuing, offline handling, routing
-- Redis — agent availability tracking, active session management
+- RabbitMQ — message queuing, offline handling, AI routing
+- Redis — agent availability tracking, escalation flags, session state
 
-Components:
+### 11.2 Complaint and Dispute System
 
-- Customer-facing chat widget (floating button, all pages)
-- Agent dashboard — web interface for agents to read and respond
-- Queue system — routes incoming chats to available agents via RabbitMQ
-- Offline fallback — durable queue stores messages when no agents online
-- Auto-reply — customer notified when agents are unavailable
+Users can lodge complaints for failed transactions, incorrect debits, delayed payments, or unauthorized activity. Each complaint is tracked with a unique UUID ticket and real-time SSE status updates.
 
-# Database Tables
+**Complaint lifecycle:** Open → In Review → Resolved → Closed
 
-## support_agents
+**Issue types:** failed transaction, wrong amount, delayed payment, unauthorized transaction, refund request, other.
 
-Stores agent-specific data only. Name and email are not duplicated here — they are fetched by joining to the `users` table when needed. Assigned chats are not stored as a column — they are derived by querying `chat_sessions WHERE agent_id = ?`.
+### 11.3 Support Database Tables
+
+**support_agents**
 
 | Field               | Type      | Description                              |
 | ------------------- | --------- | ---------------------------------------- |
-| agent_id            | UUID (PK) | Unique identifier for this agent profile |
-| user_id             | UUID (FK) | References users.user_id                 |
+| agent_id            | UUID PK   | Unique identifier for this agent profile |
+| user_id             | UUID FK   | References auth.users.user_id            |
 | availability_status | ENUM      | online / offline / busy                  |
-| created_at          | TIMESTAMP | When the agent account was created       |
-| updated_at          | TIMESTAMP | Last availability update                 |
+| created_at          | TIMESTAMPTZ | When the agent account was created     |
+| updated_at          | TIMESTAMPTZ | Last availability update               |
 
-## chat_sessions
+**chat_sessions**
 
-`agent_id` is nullable. A session starts with no agent assigned (AI handles it). The column is populated only when a customer escalates to a human agent.
+`agent_id` is nullable — a session starts unassigned. Populated only when a customer escalates to a human agent.
 
 | Field      | Type      | Description                                   |
 | ---------- | --------- | --------------------------------------------- |
-| session_id | UUID (PK) | Unique identifier                             |
-| user_id    | UUID (FK) | References users.user_id — the customer       |
-| agent_id   | UUID (FK) | References support_agents.agent_id — nullable |
+| session_id | UUID PK   | Unique identifier                             |
+| user_id    | UUID FK   | References auth.users.user_id                 |
+| agent_id   | UUID FK   | References support_agents.agent_id — nullable |
 | status     | ENUM      | active / closed                               |
-| created_at | TIMESTAMP | When session was opened                       |
-| closed_at  | TIMESTAMP | When session was closed — nullable            |
+| created_at | TIMESTAMPTZ | When session was opened                     |
+| closed_at  | TIMESTAMPTZ | When session was closed — nullable          |
 
-## chat_messages
+**chat_messages**
 
-`sender_role` is stored here intentionally. This is a justified exception to strict normalization — if an agent's role later changes, the historical record must still reflect what role they held when the message was sent.
+`sender_role` is stored intentionally — if an agent's role later changes, the historical record must still reflect what role they held when the message was sent.
 
 | Field       | Type      | Description                                            |
 | ----------- | --------- | ------------------------------------------------------ |
-| message_id  | UUID (PK) | Unique identifier                                      |
-| session_id  | UUID (FK) | References chat_sessions.session_id                    |
-| sender_id   | UUID (FK) | References users.user_id                               |
+| message_id  | UUID PK   | Unique identifier                                      |
+| session_id  | UUID FK   | References chat_sessions.session_id                    |
+| sender_id   | UUID FK   | References auth.users.user_id                          |
 | sender_role | ENUM      | customer / agent / ai — stored for historical accuracy |
 | content     | TEXT      | Message body                                           |
 | status      | ENUM      | pending / delivered                                    |
-| timestamp   | TIMESTAMP | When the message was sent                              |
+| created_at  | TIMESTAMPTZ | When the message was sent                            |
 
-### Live Chat API Endpoints
+**complaints**
 
-| Endpoint                          | Method | Role            | Description                        |
-| --------------------------------- | ------ | --------------- | ---------------------------------- |
-| /support/chat/start               | POST   | Customer        | Start a new chat session           |
-| /support/chat/:sessionId/messages | GET    | Customer, Agent | Fetch full chat history            |
-| /support/chat/:sessionId/send     | POST   | Customer, Agent | Send a message in session          |
-| /support/chat/:sessionId/close    | PATCH  | Agent, Admin    | Close/end a chat session           |
-| /support/chat/queue               | GET    | Agent, Admin    | View pending/unassigned chats      |
-| /support/agents/availability      | PATCH  | Agent           | Update agent online/offline status |
-
-### 12.2 Complaint & Dispute System
-
-Users can lodge complaints for issues such as failed transactions, incorrect debits, delayed payments, or unauthorized activity. Each complaint is tracked with a unique ticket and real-time status updates.
-
-Complaint Lifecycle:
-Open → In Review → Resolved → Closed
-
-System Behaviour:
-• Each complaint is assigned a unique UUID ticket number
-• System auto-links the relevant transaction record from user history
-• Status changes trigger SSE notifications to the customer in real time
-• Admin dashboard receives alerts on new complaint submissions
-
-Complaint Types (Issue Categories):
-• Failed transaction
-• Wrong amount debited
-• Delayed payment
-• Unauthorized transaction
-• Refund request
-• Other
-
-## complaints
-
-`assigned_agent_id` is nullable — a complaint starts unassigned. An admin populates this column via the assign endpoint.  
-User name and transaction details are not stored here. They are fetched by joining to `users` and `transactions` when needed.
+`assigned_agent_id` is nullable — a complaint starts unassigned. Admin populates this via the assign endpoint.
 
 | Field             | Type      | Description                                                         |
 | ----------------- | --------- | ------------------------------------------------------------------- |
-| complaint_id      | UUID (PK) | Unique ticket identifier                                            |
-| user_id           | UUID (FK) | References users.user_id — customer who lodged the complaint        |
-| transaction_id    | UUID (FK) | References transactions.transaction_id — auto-linked transaction    |
-| assigned_agent_id | UUID (FK) | References support_agents.agent_id — nullable until assigned        |
+| complaint_id      | UUID PK   | Unique ticket identifier                                            |
+| user_id           | UUID FK   | References auth.users.user_id                                       |
+| transaction_id    | UUID FK   | References payments.transactions.transaction_id                     |
+| assigned_agent_id | UUID FK   | References support_agents.agent_id — nullable until assigned        |
 | issue_type        | ENUM      | failed_txn / wrong_amount / delayed / unauthorized / refund / other |
-| description       | TEXT      | Customer's description of the issue                                 |
+| description       | TEXT      | Customer description of the issue                                   |
 | status            | ENUM      | open / in_review / resolved / closed                                |
-| created_at        | TIMESTAMP | When complaint was lodged                                           |
-| updated_at        | TIMESTAMP | Last status change time                                             |
+| created_at        | TIMESTAMPTZ | When complaint was lodged                                         |
+| updated_at        | TIMESTAMPTZ | Last status change                                                |
 
-### Complaint API Endpoints
+### 11.4 Support API Endpoints
 
-| Endpoint                       | Method | Role                   | Description                          |
-| ------------------------------ | ------ | ---------------------- | ------------------------------------ |
-| /support/complaints            | POST   | Customer               | Lodge a new complaint                |
-| /support/complaints/:id        | GET    | Customer, Agent, Admin | Get complaint details and status     |
-| /support/complaints/history    | GET    | Customer               | List all complaints for the user     |
-| /support/complaints/:id/update | PATCH  | Agent, Admin           | Update complaint status              |
-| /support/complaints/all        | GET    | Admin                  | View all complaints across all users |
-| /support/complaints/:id/assign | PATCH  | Admin                  | Assign complaint to a specific agent |
+**Chat**
 
----
+| Method | Endpoint                              | Role            | Description                        |
+| ------ | ------------------------------------- | --------------- | ---------------------------------- |
+| POST   | `/v1/support/chat/start`              | Customer        | Start a new chat session           |
+| GET    | `/v1/support/chat/:sessionId/messages`| Customer, Agent | Fetch full chat history            |
+| POST   | `/v1/support/chat/:sessionId/send`    | Customer, Agent | Send a message in session          |
+| PATCH  | `/v1/support/chat/:sessionId/close`   | Agent, Admin    | Close a chat session               |
+| GET    | `/v1/support/chat/queue`              | Agent, Admin    | View pending unassigned chats      |
+| PATCH  | `/v1/support/agents/availability`     | Agent           | Update agent online/offline status |
 
-## 16. OBSERVABILITY & LOGGING
+**Complaints**
 
-Reliable payment systems must provide structured logging to monitor transactions, detect failures, and assist debugging.
-The platform will use Pino for high-performance logging.
-Reasons for using Pino:
-
-- extremely fast, structured JSON logs, production ready, integrates easily with monitoring tools.
-
-### 13.1 Logging Strategy
-
-Logs will be generated at multiple system layers:
-
-- API Layer — Log incoming requests (endpoint accessed, request ID, user ID, response time).
-
-- Payment Processing — Critical payment events must be logged (payment initiated, processed, failed, duplicate prevented).
-
-- Error Logging — System errors must be logged for investigation.
-
-### 13.2 REQUEST CORRELATION
-
-- Each request should have a Request ID that travels across all services so engineers can trace a payment end to end.
-
-### 13.3 Log Levels
-
-| Level | Purpose                                                                             |
-| ----- | ----------------------------------------------------------------------------------- |
-| info  | normal operations - request,payments, cha messages sent                             |
-| warn  | Unusual but recoverable — rate limit hit, agent unavailable, offline message queued |
-| error | Failures — payment failure, DB timeout, WebSocket disconnect                        |
-| debug | development debugging                                                               |
-
-### 13.4 Log Storage
-
-- Application Servers → Pino Logs (JSON) → Log Aggregation → Monitoring Dashboard
-  Examples of log platforms: Elastic Stack, Grafana, Datadog.
-
-### 13.5 Security Logging
-
-Sensitive events must be logged: failed login attempts, suspicious payment activity, rate limit violations, authentication failures.unauthorized role access (403 events).
-
-### 13.6 Performance Metrics
-
-Logs will track: request latency, payment processing time, queue processing delays, database query performance.
+| Method | Endpoint                              | Role                   | Description                          |
+| ------ | ------------------------------------- | ---------------------- | ------------------------------------ |
+| POST   | `/v1/support/complaints`              | Customer               | Lodge a new complaint                |
+| GET    | `/v1/support/complaints/:id`          | Customer, Agent, Admin | Get complaint details and status     |
+| GET    | `/v1/support/complaints/history`      | Customer               | List all complaints for the user     |
+| PATCH  | `/v1/support/complaints/:id/update`   | Agent, Admin           | Update complaint status              |
+| GET    | `/v1/support/complaints/all`          | Admin                  | View all complaints                  |
+| PATCH  | `/v1/support/complaints/:id/assign`   | Admin                  | Assign complaint to an agent         |
 
 ---
 
-## 14. SCALABILITY LAYER
+## 12. Observability and Logging
 
-### 14.1 Docker
+The platform uses Pino for high-performance structured JSON logging.
 
-The application will be containerized using Docker.
+Each service creates a named logger instance via the shared `createLogger` factory so every log line is identifiable by service in aggregation tools.
 
-- Benefits: consistent environments, easier deployment, portability.
+**Log levels:**
 
-### 14.2 Kubernetes
+| Level | Purpose                                                                               |
+| ----- | ------------------------------------------------------------------------------------- |
+| info  | Normal operations — requests, payments, chat messages                                 |
+| warn  | Unusual but recoverable — rate limit hit, agent unavailable, offline message queued   |
+| error | Failures — payment failure, DB timeout, WebSocket disconnect                          |
+| debug | Development only                                                                      |
 
-Kubernetes will orchestrate containers.
+**Security events logged:** failed login attempts, rate limit violations, 403 role access attempts, suspicious payment activity, authentication failures.
 
-- Responsibilities: container scheduling, auto-scaling, service discovery, automatic restarts.
+**Request correlation:** every request carries a Request ID that travels across all services so engineers can trace a payment end to end.
 
-### 14.3 Load Balancing
-
-```
-
-Users → Load Balancer → Multiple Application Servers
-
-```
-
-Benefits: high availability, improved performance, fault tolerance.
+**Log pipeline:** Pino (JSON) → Log Aggregator (Elastic Stack / Grafana / Datadog) → Monitoring Dashboard.
 
 ---
 
-## 15. DevOps & CI/CD
+## 13. Scalability Layer
 
-Continuous Integration and Deployment will automate releases.
+- **Docker** — all services containerized for consistent environments and portable deployment
+- **Kubernetes** — container orchestration, auto-scaling, service discovery, automatic restarts
+- **Load Balancer** — distributes traffic across multiple instances of any service
+
+Services scale independently. If payments get heavy traffic, only the Payment Service scales — not auth or support.
+
+---
+
+## 14. DevOps and CI/CD
 
 ```
-
 Developer pushes code
 ↓
 Automated tests run
@@ -976,57 +756,43 @@ Docker image built
 Image pushed to registry
 ↓
 Deployment to Kubernetes
-
 ```
-
-Benefits: faster deployments, automated testing, reliable releases.
 
 ---
 
-## 16. High Level Architecture (Final System)
+## 15. High Level Architecture
 
 ```
-
 Client
-│
-HTTPS
-│
+↓ HTTPS
 Load Balancer
-│
-API Gateway  ←→  RBAC (JWT Role Check)
-│
-Backend Services
-│
-┌───────────────┬────────────────┬──────────────────┐│ │ │
-SQL Database  Redis Cache      RabbitMQ         webDockets
-│                |                |                  |
-Financial     Idempotency      Exchanges:           Chat services
-Records       Sessions.        chat.messages        agent dashboard
-              Agent status     offline.queue
-              Rate limits      complaints
-                               payments
-
 ↓
-Pino Logs
+API Gateway :3000 ←→ RBAC (JWT role check)
+↓ internal private network
+├── Auth Service         :3001
+├── Payment Service      :3002
+├── Notification Service :3003
+└── Support Service      :3004
+↕ all share
+├── PostgreSQL  — financial records, user data, support history
+├── Redis       — idempotency, blacklist, rate limits, agent status
+└── RabbitMQ    — payment.processing, chat.messages, agent.escalation,
+                  offline.queue, complaints
 ↓
-Log Aggregation
-↓
-Monitoring Dashboard
+Pino Logs → Log Aggregation → Monitoring Dashboard
 ```
 
 ---
 
-## 17. Key System Properties
+## 16. Key System Properties
 
-### Property Implementation
-
-| Property         | Implementation                                                     |
-| ---------------- | ------------------------------------------------------------------ |
-| Security         | HTTPS + JWT + Secure refresh tokens + RBAC role enforcement        |
-| Reliability      | Idempotent payments + durable RabbitMQ offline.queue               |
-| Consistency      | ACID transactions for all financial data                           |
-| Scalability      | Docker + Kubernetes + Load Balancing                               |
-| Performance      | Redis caching + async RabbitMQ processing                          |
-| Observability    | Pino logging + request correlation + centralized monitoring        |
-| Customer Support | WebSocket live chat + complaint ticket system + SSE status updates |
-| Access Control   | RBAC — Customer / Support Agent / Admin role separation            |
+| Property         | Implementation                                                       |
+| ---------------- | -------------------------------------------------------------------- |
+| Security         | HTTPS + JWT + secure refresh tokens + RBAC enforcement               |
+| Reliability      | Idempotent payments + durable RabbitMQ queues + DLQ                  |
+| Consistency      | ACID transactions for all financial data                             |
+| Scalability      | Docker + Kubernetes + independent service scaling                    |
+| Performance      | Redis caching + async RabbitMQ processing                            |
+| Observability    | Pino logging + request correlation + centralised monitoring          |
+| Customer Support | WebSocket live chat + AI routing + complaint system + SSE updates    |
+| Access Control   | RBAC — Customer / Support Agent / Admin role separation              |

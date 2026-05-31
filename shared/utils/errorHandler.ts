@@ -1,4 +1,4 @@
-import type { Request, Response, NextFunction } from "express";
+import type { ErrorRequestHandler } from "express";
 
 // ─────────────────────────────────────────
 // Custom Error Class
@@ -20,14 +20,10 @@ export class AppError extends Error {
 // Plug this into express ONCE in index.ts
 // It catches all errors thrown anywhere in the app
 // ─────────────────────────────────────────
-export const errorHandler = (
-  err: any,
-  _req: Request,
-  res: Response,
-  _next: NextFunction,
-) => {
-  const statusCode = err.statusCode || 500;
-  const message = err.message || "Internal server error";
+export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
+  const statusCode = err instanceof AppError ? err.statusCode : 500;
+
+  const message = err instanceof Error ? err.message : "Internal server error";
 
   res.status(statusCode).json({
     status: "error",

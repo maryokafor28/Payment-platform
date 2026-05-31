@@ -10,5 +10,4 @@ CREATE TRIGGER trg_set_updated_at
 BEFORE UPDATE ON auth.users
 FOR EACH ROW
 WHEN (OLD IS DISTINCT FROM NEW)
-
 EXECUTE FUNCTION auth.set_updated_at();
