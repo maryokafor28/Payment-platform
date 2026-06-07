@@ -1,4 +1,4 @@
-// auth-service/src/config/logger.ts
+// auth-service/src/middleware/logger.ts
 import { createLogger } from "@shared/utils/logger";
 
 const logger = createLogger("auth-service");

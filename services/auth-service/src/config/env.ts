@@ -4,7 +4,8 @@ import path from "path";
 // load the right .env file based on NODE_ENV
 dotenv.config({
   path: path.resolve(
-    process.cwd(),
+    __dirname,
+    "../..",
     process.env.NODE_ENV === "production" ? ".env.production" : ".env",
   ),
 });
@@ -29,7 +30,7 @@ export const env = {
   DB_PASSWORD: requireEnv("DB_PASSWORD"),
 
   // jwt
-  JWT_SECRET: requireEnv("JWT_SECRET"),
+  JWT_SECRET: requireEnv("JWT_SECRET") as string,
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN ?? "15m",
   REFRESH_TOKEN_SECRET: requireEnv("REFRESH_TOKEN_SECRET"),
   REFRESH_TOKEN_EXPIRES_IN: process.env.REFRESH_TOKEN_EXPIRES_IN ?? "7d",

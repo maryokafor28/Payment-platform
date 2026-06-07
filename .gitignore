@@ -6,6 +6,8 @@ dist/
 
 # environment variables (VERY IMPORTANT)
 .env
+.env.production      
+
 auth-service/.env
 payment-service/.env
 # logs

@@ -5,6 +5,8 @@ import { pool } from "./pool";
 const migrationsDir = path.join(__dirname, "../../migrations");
 
 async function ensureMigrationsTable(): Promise<void> {
+  await pool.query(`CREATE SCHEMA IF NOT EXISTS auth`);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS auth.migrations (
       id         SERIAL      PRIMARY KEY,

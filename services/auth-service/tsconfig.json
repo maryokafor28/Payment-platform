@@ -3,9 +3,11 @@
 
   "compilerOptions": {
     "outDir": "./dist",
-
     "rootDir": "../../",
-
+    "baseUrl": "../../",
+    "paths": {
+      "@shared/*": ["shared/*"]
+    },
     "typeRoots": ["./node_modules/@types", "../../shared/types"]
   },
 
