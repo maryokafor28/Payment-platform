@@ -10,6 +10,13 @@ A secure, scalable payment processing platform that enables users to initiate pa
 > For the full system architecture diagram see [Architecture Diagram](src/images/payment-architecture-diagram.drawio.svg).
 
 ---
+## 🚧 Project Status
+
+This project is being built in public, service by service.
+
+The **Auth Service** is currently in progress — JWT authentication, refresh token rotation, Redis token blacklisting, password reset, and audit logging are being implemented.
+
+The rest of the platform exists at the design level for now. Full architecture, database schema, and system flows for every planned service are documented in the [System Design Document](#).
 
 ## Table of Contents
 
