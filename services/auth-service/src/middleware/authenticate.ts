@@ -3,17 +3,8 @@ import jwt from "jsonwebtoken";
 import { AppError } from "@shared/utils/errorHandler";
 import asyncHandler from "@shared/utils/asyncHandler";
 import { redisClient } from "../config/redis";
-import { env } from "../config/env";
-import { createLogger } from "@shared/utils/logger";
-
-const logger = createLogger("auth-service");
-
-interface JwtPayload {
-  userId: string;
-  role: string;
-  iat: number;
-  exp: number;
-}
+import logger from "../config/logger";
+import { verifyAccessToken } from "../utils/jwt";
 
 export const authenticate = asyncHandler(
   async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
@@ -29,13 +20,10 @@ export const authenticate = asyncHandler(
       return next(new AppError("No token provided", 401));
     }
 
-    let decoded: JwtPayload;
+    let decoded;
 
     try {
-      decoded = jwt.verify(
-        token,
-        env.JWT_SECRET,
-      ) as jwt.JwtPayload as JwtPayload;
+      decoded = verifyAccessToken(token);
     } catch (err) {
       if (err instanceof jwt.TokenExpiredError) {
         return next(new AppError("Token has expired", 401));
@@ -52,21 +40,14 @@ export const authenticate = asyncHandler(
 
     if (blacklisted) {
       logger.warn(
-        {
-          requestId: req.id,
-          userId: decoded.userId,
-        },
+        { requestId: req.id, userId: decoded.userId },
         "Blacklisted token used",
       );
 
       return next(new AppError("Token has been invalidated", 401));
     }
 
-    req.user = {
-      userId: decoded.userId,
-      role: decoded.role,
-    };
-
+    req.user = { userId: decoded.userId, role: decoded.role, exp: decoded.exp };
     next();
   },
 );

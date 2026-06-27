@@ -1,6 +1,8 @@
 import jwt, { SignOptions } from "jsonwebtoken";
 import { env } from "../config/env";
 
+export type UserRole = "customer" | "agent" | "admin";
+
 export interface JwtPayload {
   userId: string;
   role: "customer" | "agent" | "admin";
