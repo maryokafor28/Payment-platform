@@ -168,6 +168,6 @@ Rolling update begins
 | Topic                 | Location                                  |
 | --------------------- | ----------------------------------------- |
 | Docker and containers | [docker.md](../infrastructure/docker.md)  |
-| CI/CD pipeline        | [ci-cd.md](../ci-cd.md)                   |
+| CI/CD pipeline        | [ci-cd.md](../docs/ci-cd.md)                |
 | Service overview      | [service.md](../architecture/services.md) |
 | Observability         | [logging.md](../logging.md)               |

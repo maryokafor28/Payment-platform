@@ -213,5 +213,5 @@ In development, `pino-pretty` formats logs for human reading in the terminal. In
 | ---------------------------- | ------------------------------------------------- |
 | Monitoring and alerts        | [kubernetes.md](../infrastructure/kubernates.md)  |
 | Audit logs (security record) | [database.md](../docs/infrastructure/database.md) |
-| Auth Service logging detail  | [auth.md](../../../auth-service/docs/auth.md)     |
+| Auth Service logging detail  | [auth.md](../../../../services/auth-service/docs/auth.md)   |
 | Payment Service logging      | [payment.md](../../../auth-service/docs/auth.md)  |

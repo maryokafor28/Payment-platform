@@ -138,5 +138,5 @@ PORT=3001
 | Topic                    | Location                                         |
 | ------------------------ | ------------------------------------------------ |
 | Kubernetes orchestration | [kubernetes.md](../infrastructure/kubernates.md) |
-| CI/CD pipeline           | [ci-cd.md](../ci-cd.md)                          |
+| CI/CD pipeline           | [ci-cd.md](../docs/ci-cd.md)                        |
 | Service overview         | [service.md](../architecture/services.md)        |

@@ -6,6 +6,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_set_updated_at ON auth.users;
+
 CREATE TRIGGER trg_set_updated_at
 BEFORE UPDATE ON auth.users
 FOR EACH ROW

@@ -195,12 +195,12 @@ Notification Service → SSE to customer
 
 ## Further Reading
 
-| Topic                     | Location                            |
-| ------------------------- | ----------------------------------- |
-| All services and ports    | `architecture/services.md`          |
-| How services communicate  | `architecture/communication.md`     |
-| RabbitMQ queues in detail | `infrastructure/rabbitmq.md`        |
-| Idempotency               | `payment/docs/payment.md`           |
-| JWT and token validation  | `auth/docs/auth.md`                 |
-| RBAC enforcement          | `gateway/docs/rbac.md`              |
-| SSE events                | `notification/docs/notification.md` |
+| Topic                        | Location                                                        |
+|------------------------------|-----------------------------------------------------------------|
+| All services and ports       | [services.md](../architecture/services.md)                      |
+| How services communicate     | [communication.md](../architecture/communication.md)            |
+| RabbitMQ queues in detail    | [rabbitmq.md](../infrastructure/rabbitmq.md)                    |
+| Idempotency                  | [payment.md](../../../payment-service/docs/payment.md)          |
+| JWT and token validation     | [auth.md](../../../auth-service/docs/auth.md)                   |
+| RBAC enforcement             | [gateway.md](../gateway/routing.md)                             |
+| SSE events                   | [notification.md](../../../notification-service/docs/notification.md) |

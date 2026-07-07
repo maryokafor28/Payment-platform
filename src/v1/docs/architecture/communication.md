@@ -17,7 +17,6 @@ Services communicate in two ways depending on whether they need an immediate res
 Used when a service needs an answer right now before it can continue processing.
 
 **When to use:**
-
 - The result is needed to decide what to do next
 - The operation must complete before a response is returned to the client
 
@@ -34,11 +33,11 @@ The Payment Service cannot proceed without knowing the user is valid. It waits f
 
 **Internal HTTP calls in this platform:**
 
-| Caller          | Called       | Purpose                                    |
-| --------------- | ------------ | ------------------------------------------ |
-| Payment Service | Auth Service | Verify user exists and account is active   |
-| API Gateway     | Redis        | Check token blacklist, check rate limit    |
-| Support Service | Redis        | Check agent availability before escalation |
+| Caller          | Called          | Purpose                                      |
+|-----------------|-----------------|----------------------------------------------|
+| Payment Service | Auth Service    | Verify user exists and account is active     |
+| API Gateway     | Redis           | Check token blacklist, check rate limit      |
+| Support Service | Redis           | Check agent availability before escalation  |
 
 ---
 
@@ -47,7 +46,6 @@ The Payment Service cannot proceed without knowing the user is valid. It waits f
 Used when the caller does not need to wait for the result. The job is published to a queue and processed in the background. The caller moves on immediately.
 
 **When to use:**
-
 - The result does not need to be returned to the client right now
 - The operation could be slow or involve retries
 - The operation is a side effect of something that already happened
@@ -67,27 +65,27 @@ The Payment Service does not wait for the customer to receive the notification. 
 
 **RabbitMQ queues in this platform:**
 
-| Queue                | Publisher       | Consumer             | Purpose                                  |
-| -------------------- | --------------- | -------------------- | ---------------------------------------- |
-| `payment.processing` | Payment Service | Payment Service      | Main payment processing jobs             |
-| `payment.success`    | Payment Service | Notification Service | Trigger SSE on successful payment        |
-| `payment.failed`     | Payment Service | Notification Service | Trigger SSE on failed payment            |
-| `chat.messages`      | Support Service | Support Service      | AI chat message routing                  |
-| `agent.escalation`   | Support Service | Support Service      | Live agent escalation requests           |
-| `offline.queue`      | Support Service | Support Service      | Pending messages when no agent is online |
-| `complaints`         | Support Service | Notification Service | Complaint status change notifications    |
+| Queue                | Publisher        | Consumer             | Purpose                                      |
+|----------------------|------------------|----------------------|----------------------------------------------|
+| `payment.processing` | Payment Service  | Payment Service      | Main payment processing jobs                 |
+| `payment.success`    | Payment Service  | Notification Service | Trigger SSE on successful payment            |
+| `payment.failed`     | Payment Service  | Notification Service | Trigger SSE on failed payment                |
+| `chat.messages`      | Support Service  | Support Service      | AI chat message routing                      |
+| `agent.escalation`   | Support Service  | Support Service      | Live agent escalation requests               |
+| `offline.queue`      | Support Service  | Support Service      | Pending messages when no agent is online     |
+| `complaints`         | Support Service  | Notification Service | Complaint status change notifications        |
 
 ---
 
 ## Choosing Between Sync and Async
 
-| Question                                         | Use              |
-| ------------------------------------------------ | ---------------- |
-| Do I need the result to continue?                | HTTP (sync)      |
-| Can this happen in the background?               | RabbitMQ (async) |
-| Could this operation be slow or need retries?    | RabbitMQ (async) |
-| Is this a side effect of something already done? | RabbitMQ (async) |
-| Must the client wait for this before responding? | HTTP (sync)      |
+| Question                                          | Use          |
+|---------------------------------------------------|--------------|
+| Do I need the result to continue?                 | HTTP (sync)  |
+| Can this happen in the background?                | RabbitMQ (async) |
+| Could this operation be slow or need retries?     | RabbitMQ (async) |
+| Is this a side effect of something already done?  | RabbitMQ (async) |
+| Must the client wait for this before responding?  | HTTP (sync)  |
 
 ---
 
@@ -116,9 +114,9 @@ API Gateway :3000          ← only public-facing service
 
 ## Further Reading
 
-| Topic                         | Location                       |
-| ----------------------------- | ------------------------------ |
-| End-to-end request flow       | `architecture/request-flow.md` |
-| All RabbitMQ queues in detail | `infrastructure/rabbitmq.md`   |
-| Redis usage across services   | `infrastructure/redis.md`      |
-| API Gateway routing           | `gateway/docs/gateway.md`      |
+| Topic                         | Location                        |
+|-------------------------------|---------------------------------|
+| End-to-end request flow       | [request-flow.md](../architecture/request-flow.md)  |
+| All RabbitMQ queues in detail | [rabbitmq.md](../infrastructure/rabbitmq.md)    |
+| Redis usage across services   | [redis.md](../infrastructure/redis.md)       |
+| API Gateway routing           | [gateway.md](../gateway/overview.md)       |

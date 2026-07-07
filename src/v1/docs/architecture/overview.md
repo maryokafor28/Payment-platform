@@ -51,13 +51,14 @@ If Support crashes, only support is affected. Payments and auth keep running.
 
 ## Services
 
-| Service              | Port | Responsibility                                                                  |
-| -------------------- | ---- | ------------------------------------------------------------------------------- |
-| API Gateway          | 3000 | Single entry point — JWT validation, RBAC, rate limiting, routing, logging      |
-| Auth Service         | 3001 | Registration, login, JWT issuance, logout, token blacklisting, password reset   |
-| Payment Service      | 3002 | Send, receive, balance check, transaction history, idempotency                  |
-| Notification Service | 3003 | SSE updates — payment status, complaint updates, agent alerts                   |
-| Support Service      | 3004 | WebSocket chat, AI routing, live agent escalation, complaints, agent management |
+| Service              | Port | Responsibility                                                                 |
+|----------------------|------|--------------------------------------------------------------------------------|
+| API Gateway          | 3000 | Single entry point — JWT validation, RBAC, rate limiting, routing, logging     |
+| Auth Service         | 3001 | Registration, login, JWT issuance, logout, token blacklisting, password reset  |
+| Payment Service      | 3002 | Send, receive, balance check, transaction history, idempotency                 |
+| Notification Service | 3003 | SSE updates — payment status, complaint updates, agent alerts                  |
+| Support Service      | 3004 | WebSocket chat, AI routing, live agent escalation, complaints, agent management|
+
 
 ---
 
@@ -88,11 +89,11 @@ API Gateway :3000        (only public-facing service)
 
 All services share three infrastructure components:
 
-| Component  | Purpose                                                              |
-| ---------- | -------------------------------------------------------------------- |
-| PostgreSQL | All relational data — users, transactions, support history           |
-| Redis      | Idempotency keys, token blacklist, rate limiting, agent availability |
-| RabbitMQ   | Async processing — payments, chat routing, notifications, complaints |
+| Component  | Purpose                                                                 |
+|------------|-------------------------------------------------------------------------|
+| PostgreSQL | All relational data — users, transactions, support history              |
+| Redis      | Idempotency keys, token blacklist, rate limiting, agent availability    |
+| RabbitMQ   | Async processing — payments, chat routing, notifications, complaints    |
 
 Each service owns its own PostgreSQL schema. Services never query another service's tables directly.
 
@@ -100,31 +101,31 @@ Each service owns its own PostgreSQL schema. Services never query another servic
 
 ## Key System Properties
 
-| Property       | Implementation                                                             |
-| -------------- | -------------------------------------------------------------------------- |
-| Security       | HTTPS + JWT + secure refresh tokens + RBAC enforcement at the gateway      |
-| Reliability    | Idempotent payments + durable RabbitMQ queues + Dead Letter Queue          |
-| Consistency    | ACID transactions for all financial operations                             |
-| Scalability    | Docker + Kubernetes + independent per-service scaling                      |
-| Performance    | Redis caching + async RabbitMQ processing                                  |
-| Observability  | Pino structured logging + request correlation IDs + centralised monitoring |
-| Access Control | RBAC — Customer / Support Agent / Admin role separation                    |
+| Property       | Implementation                                                              |
+|----------------|-----------------------------------------------------------------------------|
+| Security       | HTTPS + JWT + secure refresh tokens + RBAC enforcement at the gateway       |
+| Reliability    | Idempotent payments + durable RabbitMQ queues + Dead Letter Queue           |
+| Consistency    | ACID transactions for all financial operations                              |
+| Scalability    | Docker + Kubernetes + independent per-service scaling                       |
+| Performance    | Redis caching + async RabbitMQ processing                                   |
+| Observability  | Pino structured logging + request correlation IDs + centralised monitoring  |
+| Access Control | RBAC — Customer / Support Agent / Admin role separation                     |
 
 ---
 
 ## Further Reading
 
-| Topic                    | Location                                 |
-| ------------------------ | ---------------------------------------- |
-| How services communicate | `architecture/communication.md`          |
-| End-to-end request flow  | `architecture/request-flow.md`           |
-| All services and ports   | `architecture/services.md`               |
-| Architecture diagram     | `architecture/diagrams/architecture.png` |
-| Database design          | `infrastructure/database.md`             |
-| Redis usage              | `infrastructure/redis.md`                |
-| RabbitMQ queues          | `infrastructure/rabbitmq.md`             |
-| Auth Service             | `auth/docs/auth.md`                      |
-| Payment Service          | `payment/docs/payment.md`                |
-| Support Service          | `support/docs/support.md`                |
-| Notification Service     | `notification/docs/notification.md`      |
-| API Gateway              | `gateway/docs/gateway.md`                |
+| Topic                        | Location                                                        |
+|------------------------------|-----------------------------------------------------------------|
+| How services communicate     | [communication.md](../architecture/communication.md)            |
+| End-to-end request flow      | [request-flow.md](../architecture/request-flow.md)              |
+| All services and ports       | [services.md](../architecture/services.md)                      |
+| Architecture diagram         | [architecture.png](../architecture/diagrams/architecture.md)   |
+| Database design              | [database.md](../infrastructure/database.md)                    |
+| Redis usage                  | [redis.md](../infrastructure/redis.md)                          |
+| RabbitMQ queues              | [rabbitmq.md](../infrastructure/rabbitmq.md)                    |
+| Auth Service                 | [auth.md](../../../../services/auth-service/docs/auth.md)                 |
+| Payment Service              | [payment.md](../../../payment-service/docs/payment.md)          |
+| Support Service              | [support.md](../../../support-service/docs/support.md)          |
+| Notification Service         | [notification.md](../../../notification-service/docs/notification.md) |
+| API Gateway                  | [gateway.md](../gateway/overview.md)                            |
