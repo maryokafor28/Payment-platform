@@ -139,13 +139,13 @@ Never commit any `.env` file — all are excluded via `.gitignore`. A `.env.exam
 
 ## Services
 
-| Service              | Port | Status      | Docs                                          |
-| -------------------- | ---- | ----------- | --------------------------------------------- |
-| API Gateway          | 3000 | Pending     | [gateway.md](src/v1/docs/gateway/overview.md) |
-| Auth Service         | 3001 | In Progress | [auth.md](auth-service/docs/auth.md)          |
-| Payment Service      | 3002 | Pending     | —                                             |
-| Notification Service | 3003 | Pending     | —                                             |
-| Support Service      | 3004 | Pending     | —                                             |
+| Service              | Port | Status      | Docs                                             |
+| -------------------- | ---- | ----------- | ------------------------------------------------ |
+| API Gateway          | 3000 | Pending     | [overview.md](./src/v1/docs/gateway/overview.md) |
+| Auth Service         | 3001 | In Progress | [auth.md](./services/auth-service/docs/auth.md)  |
+| Payment Service      | 3002 | Pending     | —                                                |
+| Notification Service | 3003 | Pending     | —                                                |
+| Support Service      | 3004 | Pending     | —                                                |
 
 ---
 
@@ -188,12 +188,12 @@ All documentation lives in `src/v1/docs/`. Each service has its own `docs/` fold
 
 ### Service Docs
 
-| Service      | Document          | Location                                                       |
-| ------------ | ----------------- | -------------------------------------------------------------- |
-| Auth Service | Service overview  | [auth.md](auth-service/docs/auth.md)                           |
-| Auth Service | Sequence diagrams | [sequence-diagrams.md](auth-service/docs/sequence-diagrams.md) |
-| API Gateway  | Gateway overview  | [overview.md](src/v1/docs/gateway/overview.md)                 |
-| API Gateway  | Routing           | [routing.md](src/v1/docs/gateway/routing.md)                   |
+| Service      | Document          | Location                                                                  |
+| ------------ | ----------------- | ------------------------------------------------------------------------- |
+| Auth Service | Service overview  | [auth.md](./services/auth-service/docs/auth.md)                           |
+| Auth Service | Sequence diagrams | [sequence-diagrams.md](./services/auth-service/docs/sequence-diagrams.md) |
+| API Gateway  | Gateway overview  | [overview.md](./src/v1/docs/gateway/overview.md)                          |
+| API Gateway  | Routing           | [routing.md](./src/v1/docs/gateway/routing.md)                            |
 
 ---
 

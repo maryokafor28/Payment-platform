@@ -19,4 +19,4 @@ This diagram represents the architecture for the payment system.
 
 - Uses internal wallet system (no external providers yet)
 
-![Payment Architecture](../images/payment-architeture-diagram.drawio.svg)
+![Payment Architecture](../../../images/payment-architeture-diagram.drawio.svg)
