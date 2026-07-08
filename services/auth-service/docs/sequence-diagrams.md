@@ -14,61 +14,25 @@ publishes a `user.registered` event to RabbitMQ for async audit logging.
 
 ## ![Register sequence diagram](<./diagrams/auth-register-sequence-final%20(1).drawio.svg>)
 
+---
+
 ## 2. Login — Success
 
-```
-Client                    Auth Service              PostgreSQL            Redis
-  |                            |                        |                   |
-  |-- POST /v1/auth/login ----->|                        |                   |
-  |   { email, password }      |                        |                   |
-  |                            |-- validate (zod) ------>|                   |
-  |                            |                        |                   |
-  |                            |-- SELECT user --------->|                   |
-  |                            |   WHERE email = $1     |                   |
-  |                            |<-- user row -----------|                   |
-  |                            |                        |                   |
-  |                            |-- bcrypt.compare() --->|                   |
-  |                            |   password vs hash     |                   |
-  |                            |<-- true ---------------|                   |
-  |                            |                        |                   |
-  |                            |-- issueTokenPair() --->|                   |
-  |                            |-- INSERT refresh_token >|                  |
-  |                            |                        |                   |
-  |                            |-- writeAuditLog() ----->|                   |
-  |                            |   user.login           |                   |
-  |                            |                        |                   |
-  |<-- 200 accessToken --------|                        |                   |
-  |    Set-Cookie refreshToken |                        |                   |
-```
+Validates credentials, rate-limits by IP, compares password against the stored
+bcrypt hash, issues a new token pair, and publishes a `user.login` event to
+RabbitMQ for audit logging.
+
+![Login success sequence diagram](./diagrams/auth-login-success-sequence.drawio.svg)
 
 ---
 
 ## 3. Login — Failed (timing attack protection)
 
-```
-Client                    Auth Service              PostgreSQL            Redis
-  |                            |                        |                   |
-  |-- POST /v1/auth/login ----->|                        |                   |
-  |   { email, password }      |                        |                   |
-  |                            |-- SELECT user --------->|                   |
-  |                            |   WHERE email = $1     |                   |
-  |                            |<-- rows: [] -----------|                   |
-  |                            |                        |                   |
-  |                            |-- bcrypt.compare() --->|                   |
-  |                            |   password vs DUMMY_HASH (full cost runs)  |
-  |                            |<-- false --------------|                   |
-  |                            |                        |                   |
-  |                            |-- writeAuditLog() ----->|                   |
-  |                            |   auth.failed_login    |                   |
-  |                            |   userId = null        |                   |
-  |                            |                        |                   |
-  |<-- 401 Invalid email ------|                        |                   |
-  |    or password             |                        |                   |
-  |                            |                        |                   |
-  | (response time identical to success — no timing leak)                   |
-```
+Same request path as a successful login, but runs `bcrypt.compare` against a
+fixed dummy hash when no user is found — keeping response time identical
+between "email not found" and "wrong password" to prevent enumeration.
 
----
+## ![Login failed sequence diagram](./diagrams/auth-login-failed-sequence.drawio.svg)
 
 ## 4. Token Refresh — Rotation
 
