@@ -34,131 +34,54 @@ between "email not found" and "wrong password" to prevent enumeration.
 
 ## ![Login failed sequence diagram](./diagrams/auth-login-failed-sequence.drawio.svg)
 
+---
+
 ## 4. Token Refresh — Rotation
 
-```
-Client                    Auth Service              PostgreSQL            Redis
-  |                            |                        |                   |
-  |-- POST /v1/auth/refresh --->|                        |                   |
-  |   Cookie: refreshToken     |                        |                   |
-  |                            |-- verifyRefreshToken() |                   |
-  |                            |   check signature      |                   |
-  |                            |<-- decoded payload ----|                   |
-  |                            |                        |                   |
-  |                            |-- findRefreshToken() -->|                  |
-  |                            |   SELECT WHERE hash=$1 |                   |
-  |                            |<-- { revoked, expires_at }                 |
-  |                            |                        |                   |
-  |                            |-- revoked OR expired? ->|                  |
-  |                            |<-- 401 if true --------|                   |
-  |                            |                        |                   |
-  |                            |-- revokeRefreshToken() >|                  |
-  |                            |   SET revoked = TRUE   |                   |
-  |                            |                        |                   |
-  |                            |-- SELECT user ---------->|                  |
-  |                            |   WHERE user_id = $1   |                   |
-  |                            |<-- user row -----------|                   |
-  |                            |                        |                   |
-  |                            |-- issueTokenPair() --->|                   |
-  |                            |-- INSERT new refresh_token                 |
-  |                            |                        |                   |
-  |                            |-- writeAuditLog() ----->|                   |
-  |                            |   user.token_refreshed |                   |
-  |                            |                        |                   |
-  |<-- 200 new accessToken ----|                        |                   |
-  |    Set-Cookie new refreshToken                      |                   |
-```
+Verifies the refresh token's signature first — a pure in-memory
+cryptographic check, no Redis or database call — to extract the userId,
+since there's no access token available to authenticate with at this
+endpoint. That userId is then used to rate-limit via Redis (20/min per
+user). Once within limits, the token is checked against the database,
+rotated (the old one is revoked and can never be replayed), and a brand
+new access/refresh pair is issued.
+
+## ![Token refresh sequence diagram](./diagrams/auth-refresh-sequence.drawio.svg)
 
 ---
 
 ## 5. Logout — Single Device
 
-```
-Client                    Auth Service              PostgreSQL            Redis
-  |                            |                        |                   |
-  |-- POST /v1/auth/logout ---->|                        |                   |
-  |   Authorization: Bearer    |                        |                   |
-  |   Cookie: refreshToken     |                        |                   |
-  |                            |-- authenticate() ----->|                   |
-  |                            |   verify JWT           |                   |
-  |                            |                        |                   |
-  |                            |-- calculate TTL ------->|                   |
-  |                            |   exp - now            |                   |
-  |                            |                        |                   |
-  |                            |-- Promise.all() ------->|                   |
-  |                            |   SET blacklist:<token> |-- SET blacklist ->|
-  |                            |   EX = remainingSeconds|                   |
-  |                            |   revokeRefreshToken() >|                  |
-  |                            |   SET revoked = TRUE   |                   |
-  |                            |                        |                   |
-  |                            |-- writeAuditLog() ----->|                   |
-  |                            |   user.logout          |                   |
-  |                            |                        |                   |
-  |<-- 200 Logged out ---------|                        |                   |
-  |    Clear-Cookie refreshToken                        |                   |
-```
+Authenticates the request (JWT signature + blacklist check), rate-limits
+by the now-known userId, then blacklists the access token in Redis and
+revokes the refresh token in the database in parallel — the refresh token
+revocation only runs if a refresh token cookie was actually present.
+
+![Logout sequence diagram](./diagrams/auth-logout-sequence.drawio.svg)
 
 ---
 
 ## 6. Logout — All Devices
 
-```
-Client                    Auth Service              PostgreSQL            Redis
-  |                            |                        |                   |
-  |-- POST /v1/auth/logout/all >|                        |                   |
-  |   Authorization: Bearer    |                        |                   |
-  |                            |-- authenticate() ----->|                   |
-  |                            |                        |                   |
-  |                            |-- Promise.all() ------->|                   |
-  |                            |   SET blacklist:<token> |-- SET blacklist ->|
-  |                            |   EX = remainingSeconds|                   |
-  |                            |   UPDATE refresh_tokens>|                  |
-  |                            |   SET revoked = TRUE   |                   |
-  |                            |   WHERE user_id = $1   |                   |
-  |                            |   AND revoked = FALSE  |                   |
-  |                            |   (hits partial index) |                   |
-  |                            |                        |                   |
-  |                            |-- writeAuditLog() ----->|                   |
-  |                            |   user.logout_all      |                   |
-  |                            |                        |                   |
-  |<-- 200 Logged out ---------|                        |                   |
-  |    from all devices        |                        |                   |
-```
+Authenticates the request and rate-limits by userId (5/min — stricter than
+single-device logout), then blacklists the current access token in Redis
+and revokes every active refresh token for the user in parallel, hitting
+the partial index on `(user_id) WHERE revoked = FALSE` for efficiency even
+with many active sessions.
+
+![Logout all devices sequence diagram](./diagrams/auth-logout-all-sequence.drawio.svg)
 
 ---
 
 ## 7. Forgot Password
 
-```
-Client                    Auth Service              PostgreSQL            Redis
-  |                            |                        |                   |
-  |-- POST /v1/auth/---------->|                        |                   |
-  |   forgot-password          |                        |                   |
-  |   { email }                |                        |                   |
-  |                            |-- validate (zod) ------>|                   |
-  |                            |                        |                   |
-  |                            |-- SELECT user_id ------>|                   |
-  |                            |   WHERE email = $1     |                   |
-  |                            |                        |                   |
-  |           (if not found) --|-- return immediately -->|                   |
-  |<-- 200 same response ------|   (no enumeration)     |                   |
-  |                            |                        |                   |
-  |           (if found) ------>|                        |                   |
-  |                            |-- randomBytes(32) ---->|                   |
-  |                            |-- SET password_reset:<token>           --->|
-  |                            |   value = userId       |                   |
-  |                            |   TTL = 900s (15 min)  |                   |
-  |                            |                        |                   |
-  |                            |-- writeAuditLog() ----->|                   |
-  |                            |   user.password_reset_requested            |
-  |                            |                        |                   |
-  |                            |-- logger.info() ------->|                   |
-  |                            |   (TODO: email delivery)|                  |
-  |                            |                        |                   |
-  |<-- 200 same response ------|                        |                   |
-  |   "If an account exists,   |                        |                   |
-  |    a reset link was sent"  |                        |                   |
-```
+Rate-limits by IP (5/hour), then looks up the email. Whether or not an
+account exists, the client receives the identical response — this prevents
+attackers from using the endpoint to enumerate registered emails. If found,
+a single-use reset token is generated and stored in Redis with a 15-minute
+TTL; email delivery is a TODO pending the Notification Service.
+
+![Forgot password sequence diagram](./diagrams/auth-forgot-password-sequence.drawio.svg)
 
 ---
 

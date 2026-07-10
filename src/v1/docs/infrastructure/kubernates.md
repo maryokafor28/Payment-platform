@@ -65,7 +65,8 @@ API Gateway pods          ← only service exposed via Ingress
 ├── Notification Service pods :3003
 └── Support Service pods      :3004
         ↕
-├── PostgreSQL
+├── PgBouncer                 ← all services connect here
+├── PostgreSQL                ← PgBouncer connects here
 ├── Redis
 └── RabbitMQ
 ```
@@ -165,9 +166,9 @@ Rolling update begins
 
 ## Further Reading
 
-| Topic                 | Location                                  |
-| --------------------- | ----------------------------------------- |
-| Docker and containers | [docker.md](../infrastructure/docker.md)  |
-| CI/CD pipeline        | [ci-cd.md](../docs/ci-cd.md)                |
-| Service overview      | [service.md](../architecture/services.md) |
-| Observability         | [logging.md](../logging.md)               |
+| Topic                 | Location                                   |
+| --------------------- | ------------------------------------------ |
+| Docker and containers | [docker.md](../infrastructure/docker.md)   |
+| CI/CD pipeline        | [ci-cd.md](../ci-cd.md)                    |
+| Service overview      | [services.md](../architecture/services.md) |
+| Observability         | [logging.md](../logging.md)                |

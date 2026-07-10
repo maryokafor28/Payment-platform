@@ -16,24 +16,24 @@ The platform uses **ioredis** as the Redis client.
 
 ## Why Redis
 
-| Requirement                        | How Redis Meets It                                              |
-|------------------------------------|-----------------------------------------------------------------|
-| Sub-millisecond lookups            | In-memory — no disk I/O                                         |
-| Automatic expiry                   | Native TTL on every key — no cleanup jobs needed                |
-| Atomic operations                  | Lua scripts execute atomically — no race conditions             |
-| High-frequency writes              | Handles rate limit counters and idempotency keys at scale       |
-| Temporary state                    | Data that should expire naturally — tokens, counters, flags     |
+| Requirement             | How Redis Meets It                                          |
+| ----------------------- | ----------------------------------------------------------- |
+| Sub-millisecond lookups | In-memory — no disk I/O                                     |
+| Automatic expiry        | Native TTL on every key — no cleanup jobs needed            |
+| Atomic operations       | Lua scripts execute atomically — no race conditions         |
+| High-frequency writes   | Handles rate limit counters and idempotency keys at scale   |
+| Temporary state         | Data that should expire naturally — tokens, counters, flags |
 
 ---
 
 ## Usage Across Services
 
-| Service              | What It Stores In Redis                                        |
-|----------------------|----------------------------------------------------------------|
-| API Gateway          | Token blacklist, rate limit counters                           |
-| Auth Service         | Blacklisted access tokens, password reset tokens              |
-| Payment Service      | Idempotency keys                                               |
-| Support Service      | Agent availability status, escalation flags, session state     |
+| Service         | What It Stores In Redis                                    |
+| --------------- | ---------------------------------------------------------- |
+| API Gateway     | Token blacklist, rate limit counters                       |
+| Auth Service    | Blacklisted access tokens, password reset tokens           |
+| Payment Service | Idempotency keys                                           |
+| Support Service | Agent availability status, escalation flags, session state |
 
 ---
 
@@ -42,11 +42,13 @@ The platform uses **ioredis** as the Redis client.
 When a user logs out, their access token is stored in Redis with a TTL matching the token's remaining lifespan. The API Gateway checks this blacklist on every request before forwarding to any service.
 
 **Key pattern:**
+
 ```
 blacklist:<token>  →  user_id  →  TTL = remaining token lifespan
 ```
 
 **Flow:**
+
 ```
 User logs out
       ↓
@@ -74,11 +76,13 @@ Once the token would have expired anyway, there is no need to keep it in the bla
 Password reset tokens are stored only in Redis — never in the database. They are single-use and expire after 15 minutes.
 
 **Key pattern:**
+
 ```
 password_reset:<token>  →  user_id  →  TTL = 15 minutes
 ```
 
 **Flow:**
+
 ```
 User submits email
       ↓
@@ -111,11 +115,13 @@ The token is temporary — it has no value after use and must expire automatical
 Every payment request must include an `Idempotency-Key` header. The Payment Service checks Redis before processing — if the key exists, the previous result is returned without processing the payment again.
 
 **Key pattern:**
+
 ```
 idempotency:<key>  →  previous result  →  TTL = 24 hours
 ```
 
 **Flow:**
+
 ```
 Client sends POST /v1/payments/send with Idempotency-Key header
       ↓
@@ -135,11 +141,13 @@ A network timeout may cause the client to retry a request. Without idempotency, 
 The platform uses a shared rate limiter middleware backed by Redis. Each service configures its own rules — limits are enforced per user or per IP depending on the endpoint.
 
 **Key pattern:**
+
 ```
 rl:<keyPrefix>:<label>:<identifier>  →  request count  →  TTL = window seconds
 ```
 
 **Example keys:**
+
 ```
 rl:forgot-password:per-hour:ip:102.89.1.1
 rl:login:per-15min:user:uuid
@@ -159,6 +167,7 @@ return current
 ```
 
 **Flow:**
+
 ```
 Request arrives
       ↓
@@ -176,12 +185,12 @@ If Redis is unavailable, the rate limiter fails open — legitimate requests are
 
 **Per-service rules:**
 
-| Service  | Endpoint                  | Limit                  | Identified By |
-|----------|---------------------------|------------------------|---------------|
-| Auth     | `POST /v1/auth/login`     | 10 requests per 15 min | IP            |
-| Auth     | `POST /v1/auth/forgot-password` | 5 requests per hour | IP          |
-| Payment  | `POST /v1/payments/send`  | 20 requests per minute | User          |
-| Support  | `POST /v1/support/chat`   | 50 requests per minute | User          |
+| Service | Endpoint                        | Limit                  | Identified By |
+| ------- | ------------------------------- | ---------------------- | ------------- |
+| Auth    | `POST /v1/auth/login`           | 10 requests per 15 min | IP            |
+| Auth    | `POST /v1/auth/forgot-password` | 5 requests per hour    | IP            |
+| Payment | `POST /v1/payments/send`        | 20 requests per minute | User          |
+| Support | `POST /v1/support/chat`         | 50 requests per minute | User          |
 
 > When the API Gateway is built, all rate limiting rules will move there and the per-service middleware will be removed. The shared `rateLimiter` function will remain in the shared folder — only the wiring changes.
 
@@ -192,11 +201,13 @@ If Redis is unavailable, the rate limiter fails open — legitimate requests are
 The Support Service tracks each agent's availability status in Redis for fast lookups during chat routing and escalation.
 
 **Key pattern:**
+
 ```
 agent:availability:<agent_id>  →  online | offline | busy
 ```
 
 **Flow:**
+
 ```
 Agent updates status → PATCH /v1/support/agents/availability
       ↓
@@ -217,11 +228,13 @@ No agent     → message queued in offline.queue
 When a customer requests a live agent or AI confidence drops below threshold, an escalation flag is set in Redis for that session. The Chat Router reads this flag to decide whether to route messages to AI or to a human agent.
 
 **Key pattern:**
+
 ```
 escalation:<session_id>  →  true  →  TTL = session lifespan
 ```
 
 **Flow:**
+
 ```
 Customer types "I want a human"
 OR AI confidence drops below threshold
@@ -239,22 +252,23 @@ Flag not set → route to AI
 
 ## Key Summary
 
-| Key Pattern                              | Value             | TTL                        | Set By           |
-|------------------------------------------|-------------------|----------------------------|------------------|
-| `blacklist:<token>`                      | `user_id`         | Remaining token lifespan   | Auth Service     |
-| `password_reset:<token>`                 | `user_id`         | 15 minutes                 | Auth Service     |
-| `idempotency:<key>`                      | Previous result   | 24 hours                   | Payment Service  |
-| `rl:<prefix>:<label>:<identifier>`       | Request count     | Window duration            | Shared middleware|
-| `agent:availability:<agent_id>`          | Status string     | No expiry — manually updated | Support Service |
-| `escalation:<session_id>`               | `true`            | Session lifespan           | Support Service  |
+| Key Pattern                        | Value           | TTL                          | Set By            |
+| ---------------------------------- | --------------- | ---------------------------- | ----------------- |
+| `blacklist:<token>`                | `user_id`       | Remaining token lifespan     | Auth Service      |
+| `password_reset:<token>`           | `user_id`       | 15 minutes                   | Auth Service      |
+| `idempotency:<key>`                | Previous result | 24 hours                     | Payment Service   |
+| `rl:<prefix>:<label>:<identifier>` | Request count   | Window duration              | Shared middleware |
+| `agent:availability:<agent_id>`    | Status string   | No expiry — manually updated | Support Service   |
+| `escalation:<session_id>`          | `true`          | Session lifespan             | Support Service   |
+| `balance:<userId>`                 | account balance | 30 seconds                   | Payment Service   |
 
 ---
 
 ## Further Reading
 
-| Topic                         | Location                                                        |
-|-------------------------------|-----------------------------------------------------------------|
-| RabbitMQ queues               | [rabbitmq.md](../infrastructure/rabbitmq.md)                    |
-| Auth Service — token flow     | [auth.md](../../../../services/auth-service/docs/auth.md)                 |
-| Payment Service — idempotency | [payment.md](../../../payment-service/docs/payment.md)          |
-| Support Service — chat flow   | [support.md](../../../support-service/docs/support.md)          |
+| Topic                         | Location                                                  |
+| ----------------------------- | --------------------------------------------------------- |
+| RabbitMQ queues               | [rabbitmq.md](../infrastructure/rabbitmq.md)              |
+| Auth Service — token flow     | [auth.md](../../../../services/auth-service/docs/auth.md) |
+| Payment Service — idempotency | [payment.md](../../../payment-service/docs/payment.md)    |
+| Support Service — chat flow   | [support.md](../../../support-service/docs/support.md)    |
